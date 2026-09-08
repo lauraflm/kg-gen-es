@@ -1,0 +1,59 @@
+Extraerás tripletas sujeto-predicado-objeto a partir de un texto fuente para construir un grafo de conocimiento. Ya se ha extraído de este texto una lista de entidades, y tu tarea es identificar las relaciones entre estas entidades.
+
+Tu tarea es extraer tripletas con la forma (sujeto | predicado | objeto), donde:
+
+* El **sujeto** debe ser una entidad de la lista de entidades anterior.
+* El **objeto** debe ser una entidad de la lista de entidades anterior.
+* El **predicado** describe la relación entre el sujeto y el objeto.
+
+## Directrices de extracción
+
+Sigue estas reglas al extraer relaciones:
+
+**Precisión y fidelidad:**
+
+* Extrae únicamente relaciones que estén explícitamente indicadas o claramente implicadas en el texto fuente.
+* No infieras relaciones que vayan más allá de lo que establece el texto.
+* Extrae únicamente relaciones factuales (no opiniones, situaciones hipotéticas ni afirmaciones negadas).
+
+**Calidad de los predicados:**
+
+* Utiliza predicados claros y específicos que describan con precisión la relación.
+* Ejemplos de buenos predicados: `"fundado_por"`, `"ubicado_en"`, `"trabaja_para"`, `"inventó"`, `"parte_de"`, `"posee"`, `"administra"`, `"creó"`, `"adquirió"`.
+* Evita predicados vagos como `"relacionado_con"` o `"asociado_con"`, a menos que no sea posible determinar una relación más específica.
+
+**Direccionalidad:**
+
+* Asegúrate de que el orden sujeto-predicado-objeto represente correctamente la dirección de la relación.
+* Por ejemplo: `(Apple | fundado_por | Steve Jobs)` y no `(Steve Jobs | fundado_por | Apple)`.
+
+**Exhaustividad:**
+
+* Extrae TODAS las relaciones significativas presentes en el texto.
+* Presta especial atención a las entidades que, de otro modo, podrían quedar sin conexiones: si una entidad fue incluida en la lista, probablemente sea importante y debería tener al menos una relación.
+* Tu objetivo es maximizar la conectividad del grafo de conocimiento y minimizar la cantidad de entidades aisladas.
+
+## Proceso
+
+Antes de proporcionar tu respuesta final, desarrolla tu análisis sistemáticamente dentro de las etiquetas correspondientes. Sigue estos pasos:
+
+1. **Mapear las entidades al texto**: Para cada entidad de la lista de entidades, cita el o los fragmentos relevantes del texto fuente en los que dicha entidad aparezca o sea mencionada. Esto te ayudará a mantener el contexto asociado a cada entidad.
+
+2. **Identificar relaciones sistemáticamente**: Recorre las entidades y busca conexiones entre ellas. Para cada relación potencial:
+
+   * Cita el fragmento específico del texto que respalda la relación.
+   * Identifica la entidad que actúa como sujeto.
+   * Identifica la entidad que actúa como objeto.
+   * Determina el predicado que mejor describe la relación.
+   * Verifica que la direccionalidad sea correcta.
+   * Confirma que la relación sea fiel al texto fuente.
+
+3. **Redactar las tripletas iniciales**: A partir de las relaciones identificadas, escribe todas las tripletas encontradas junto con una breve nota sobre la evidencia que las respalda.
+
+4. **Comprobar entidades aisladas**: Revisa tu lista de tripletas e identifica cualquier entidad de la lista de entidades que no aparezca en ninguna tripleta. Para cada entidad aislada:
+
+   * Vuelve a examinar los fragmentos del texto fuente recopilados en el paso 1.
+   * Busca conexiones indirectas o sutiles que puedas haber pasado por alto.
+   * Considera si existe alguna relación adicional que pueda extraerse.
+
+5. **Finalizar las tripletas**: Crea la lista final de tripletas verificadas que se incluirán en la salida.

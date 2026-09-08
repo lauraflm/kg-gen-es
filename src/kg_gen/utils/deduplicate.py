@@ -1,11 +1,43 @@
 import unicodedata
+from typing import Optional
+
 from kg_gen.models import Graph
+from kg_gen.utils.text_normalization import TextNormalizer
 from semhash import SemHash
-import inflect
+
+# Optional: model2vec for custom SemHash encoder
+try:
+    from model2vec import StaticModel
+except ImportError:
+    StaticModel = None
+
+
+def _representative_sort_key(text: str) -> tuple:
+    """Preference order for the display form among variants that differ only
+    in case or accents.
+
+    Sorting by (length, alphabetical) decides by codepoint order, which
+    systematically favors the worst variant: uppercase sorts before lowercase
+    ("PARIS" < "Paris") and ASCII before accented letters ("Garcia" <
+    "García"), so accents were dropped and shouted forms won.
+
+    Mixed capitalization and the higher count of diacritics come first;
+    length and alphabetical order remain only as a deterministic tiebreak.
+    Acronyms are unaffected: with no mixed-case variant to compare against
+    ("ONU" vs "onu"), the tiebreak still picks the uppercase form.
+    """
+    has_upper = any(c.isupper() for c in text)
+    has_lower = any(c.islower() for c in text)
+    mixed_case = has_upper and has_lower
+
+    nfkd = unicodedata.normalize("NFKD", text)
+    diacritics = sum(1 for c in nfkd if unicodedata.combining(c))
+
+    return (0 if mixed_case else 1, -diacritics, len(text), text)
 
 
 class DeduplicateList:
-    inflect_engine: inflect.engine
+    normalizer: TextNormalizer
     original_map: dict[str, str]
     items_map: dict[str, str]
     duplicates: dict[str, str]
@@ -17,9 +49,17 @@ class DeduplicateList:
     duplicate_items: int
     reduction: float
 
-    def __init__(self, threshold: float = 0.95):
+    def __init__(
+        self,
+        threshold: float = 0.95,
+        language: str = "en",
+        semhash_model=None,
+        item_type: str = "entity",
+    ):
         self.threshold = threshold
-        self.inflect_engine = inflect.engine()
+        self.normalizer = TextNormalizer(language=language)
+        self.semhash_model = semhash_model
+        self.item_type = item_type
         self.original_map = {}
         self.items_map = {}
         self.duplicates = {}
@@ -29,18 +69,18 @@ class DeduplicateList:
         """
         Normalize a text.
         """
-        return unicodedata.normalize("NFKC", text)
+        return self.normalizer.normalize(text)
 
     def singularize(self, text: str) -> str:
         """
-        Singularize a text.
+        Lemmatize text (language-aware). Entities are lemmatized on nouns
+        only; edges/predicates also lemmatize verbs, since predicates are
+        usually verb phrases whose conjugation should collapse for dedup.
+        Kept as `singularize` for interface compatibility.
         """
-        # singularize each token when it looks like a plural noun
-        tokens = []
-        for tok in text.split():
-            sing = self.inflect_engine.singular_noun(tok)
-            tokens.append(sing if isinstance(sing, str) and sing else tok)
-        return " ".join(tokens).strip()
+        if self.item_type == "edge":
+            return self.normalizer.lemmatize_predicate(text)
+        return self.normalizer.lemmatize_nouns(text)
 
     def deduplicate(self, items: list[str]) -> list[str]:
         """
@@ -56,35 +96,72 @@ class DeduplicateList:
         self.total_items = len(items)
 
         # Normalize and singularize each string
-        normalized_items = set()
+        # Collapse case/accent-only variants (e.g. "México" / "MÉXICO") to a
+        # single canonical singular form before SemHash, so they merge
+        # deterministically instead of depending on the similarity threshold.
+        # `items` arrives from a Graph `set`, whose iteration order depends on
+        # PYTHONHASHSEED and therefore CHANGES between processes. Picking the
+        # representative by arrival order -- last one wins in `items_map`,
+        # first one wins in `fold_to_singular` -- makes two identical runs
+        # export different forms ("contribuye a" vs "contribuyen a") for no
+        # reason. Collect the candidates instead and choose with an explicit
+        # rule, which also makes the result reproducible across processes.
+        def _representative(candidates: set[str]) -> str:
+            return min(candidates, key=_representative_sort_key)
+
+        singular_by_item: dict[str, str] = {}
+        fold_candidates: dict[str, set[str]] = {}
         for item in items:
             normalized = self.normalize(item)
             singular = self.singularize(normalized)
+            singular_by_item[item] = singular
+            fold_candidates.setdefault(self.normalizer.fold(singular), set()).add(
+                singular
+            )
+
+        fold_to_singular = {k: _representative(v) for k, v in fold_candidates.items()}
+
+        originals_by_form: dict[str, set[str]] = {}
+        normalized_items = set()
+        for item in items:
+            singular = fold_to_singular[self.normalizer.fold(singular_by_item[item])]
             self.original_map[item] = singular
-            self.items_map[singular] = item
+            originals_by_form.setdefault(singular, set()).add(item)
             normalized_items.add(singular)
 
+        for singular, originals in originals_by_form.items():
+            self.items_map[singular] = _representative(originals)
+
         # Deduplicate the normalized strings
-        semhash = SemHash.from_records(records=list(normalized_items))
+        # Pass custom model if provided (e.g. multilingual potion)
+        # `sorted`, not `list`: given two near-duplicates SemHash keeps the one
+        # it saw first, so input order decides which survives. With a `set`
+        # that order depends on PYTHONHASHSEED and changes between processes.
+        semhash_kwargs = {"records": sorted(normalized_items)}
+        if self.semhash_model is not None:
+            semhash_kwargs["model"] = self.semhash_model
+
+        semhash = SemHash.from_records(**semhash_kwargs, ann_backend="basic")
         deduplication_result = semhash.self_deduplicate(threshold=self.threshold)
 
         self.deduplicated_items = len(deduplication_result.selected)
-        self.duplicate_items = len(deduplication_result.duplicates)
-        self.reduction = (self.duplicate_items / self.total_items) * 100
+        # Count what actually merged, not just what SemHash discarded: the
+        # case/accent collapsing happens BEFORE SemHash is called, so those
+        # items never show up in `filtered`. Using len(filtered) reported 0
+        # duplicates in cases where a merge had in fact happened.
+        self.duplicate_items = self.total_items - self.deduplicated_items
+        self.reduction = (
+            (self.duplicate_items / self.total_items) * 100 if self.total_items else 0.0
+        )
 
         # Map back to original strings
-        duplicates = deduplication_result.duplicates
-        for duplicate in duplicates:
+        for duplicate in deduplication_result.filtered:
             original = duplicate.record
-            # Check if duplicates list is not empty before accessing
-            if (
-                duplicate.duplicates
-                and len(duplicate.duplicates) > 0
-                and len(duplicate.duplicates[0]) > 0
-            ):
+            # duplicate.duplicates is a list of (record, score) tuples
+            if duplicate.duplicates:
                 duplicate_value = duplicate.duplicates[0][0]
                 self.items_map[original] = self.items_map[duplicate_value]
-                if not original in self.duplicates:
+                if original not in self.duplicates:
                     self.duplicates[original] = duplicate_value
 
         self.deduplicated = deduplication_result.selected
@@ -93,17 +170,57 @@ class DeduplicateList:
         return f"Total items: {self.total_items}; Deduplicated items: {self.deduplicated_items}; Duplicate items: {self.duplicate_items}; Reduction: {self.reduction:.1f}"
 
 
+# ---- Module-level cache for Model2Vec models ----
+_M2V_CACHE: dict[str, object] = {}
+
+
+def _load_semhash_model(model_name: Optional[str] = None):
+    """Load and cache a Model2Vec model for SemHash. Returns None if no name given."""
+    if model_name is None:
+        return None
+    if model_name not in _M2V_CACHE:
+        if StaticModel is None:
+            raise ImportError(
+                "model2vec is required for custom SemHash models. "
+                "Install with: pip install model2vec"
+            )
+        _M2V_CACHE[model_name] = StaticModel.from_pretrained(model_name)
+    return _M2V_CACHE[model_name]
+
+
 def run_semhash_deduplication(
     graph: Graph,
     similarity_threshold: float = 0.95,
+    language: str = "en",
+    semhash_model_name: Optional[str] = None,
 ) -> Graph:
     """
     Deduplicate the graph.
+
+    Args:
+        graph: Input knowledge graph.
+        similarity_threshold: SemHash cosine similarity threshold.
+        language: Language code for text normalization ("en", "es", etc.).
+        semhash_model_name: HuggingFace model name for SemHash encoder.
+            If None, uses SemHash default (potion-base-8M).
+            For multilingual: "minishlab/potion-multilingual-128M".
     """
+    semhash_model = _load_semhash_model(semhash_model_name)
+
     # Deduplicate each graph components
-    entities_dedup = DeduplicateList(similarity_threshold)
+    entities_dedup = DeduplicateList(
+        similarity_threshold,
+        language=language,
+        semhash_model=semhash_model,
+        item_type="entity",
+    )
     entities_dedup.deduplicate(graph.entities)
-    edges_dedup = DeduplicateList(similarity_threshold)
+    edges_dedup = DeduplicateList(
+        similarity_threshold,
+        language=language,
+        semhash_model=semhash_model,
+        item_type="edge",
+    )
     edges_dedup.deduplicate(graph.edges)
 
     def _get_relation(relation: list[str]) -> list[str]:

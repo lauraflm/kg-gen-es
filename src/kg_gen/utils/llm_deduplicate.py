@@ -10,6 +10,38 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from sklearn.cluster import KMeans
 
+from kg_gen.utils.i18n import pick as _pick
+
+# Nouns used to refer to the items being deduplicated, interpolated into the
+# prompt. Keyed by item type ("node"/"edge") then (plural, singular).
+# Both Spanish plurals are feminine, which keeps "{plural} duplicadas"
+# agreeing for either type.
+_ITEM_NOUNS = {
+    "en": {
+        "node": ("entities", "entity"),
+        "edge": ("edges", "edge"),
+    },
+    "es": {
+        "node": ("entidades", "entidad"),
+        "edge": ("aristas", "arista"),
+    },
+}
+
+_DEDUPLICATE_INSTRUCTIONS = {
+    "en": "Find duplicate {plural} for the item and an alias that best represents the duplicates. Duplicates are those that are the same in meaning, such as with variation in tense, plural form, stem form, case, abbreviation, shorthand. Return an empty list if there are none.",
+    "es": "Encuentra {plural} duplicadas para el elemento y un alias que represente mejor a los duplicados. Los duplicados son aquellos que tienen el mismo significado, con variaciones de tiempo verbal, número, forma raíz, mayúsculas, abreviatura o forma corta. Devuelve una lista vacía si no hay ninguno.",
+}
+
+_DUPLICATES_OUTPUT_DESC = {
+    "en": "Exact matches to items in {plural} set",
+    "es": "Coincidencias exactas con elementos del conjunto de {plural}",
+}
+
+_ALIAS_OUTPUT_DESC = {
+    "en": "Best {singular} name to represent the duplicates, ideally from the {plural} set",
+    "es": "Mejor nombre de {singular} para representar a los duplicados, idealmente del conjunto de {plural}",
+}
+
 
 class LLMDeduplicate:
     graph: Graph
@@ -19,14 +51,28 @@ class LLMDeduplicate:
     edge_clusters: list[list[str]]
     retrieval_model: SentenceTransformer
     lm: dspy.LM
+    language: str
 
     logger: logging.Logger = logging.getLogger(__name__)
 
-    def __init__(self, retrieval_model: SentenceTransformer, lm: dspy.LM, graph: Graph):
+    def __init__(
+        self,
+        retrieval_model: SentenceTransformer,
+        lm: dspy.LM,
+        graph: Graph,
+        language: str = "en",
+    ):
         """
         Initialize KG-assisted RAG with cached embeddings, BM25 tokens, and text chunk store.
+
+        Args:
+            language: Language code for the deduplication prompts. This step
+                picks the alias that becomes each entity's final name in the
+                graph, so an untranslated prompt here can rename non-English
+                entities into English.
         """
         self.graph = graph
+        self.language = language
         self.nodes = list(graph.entities)
         self.edges = list(graph.edges)
         self.node_clusters = graph.entity_clusters or []
@@ -174,8 +220,7 @@ class LLMDeduplicate:
 
         items = set()
         item_clusters = {}
-        plural_type = "entities" if type == "node" else "edges"
-        singular_type = "entity" if type == "node" else "edge"
+        plural_type, singular_type = _pick(_ITEM_NOUNS, self.language)[type]
 
         self.logger.info(
             "Starting deduplication of %s %s in cluster", len(cluster), plural_type
@@ -210,15 +255,24 @@ class LLMDeduplicate:
                 )
 
             class Deduplicate(dspy.Signature):
-                __doc__ = f"""Find duplicate {plural_type} for the item and an alias that best represents the duplicates. Duplicates are those that are the same in meaning, such as with variation in tense, plural form, stem form, case, abbreviation, shorthand. Return an empty list if there are none. 
-                """
+                __doc__ = _pick(_DEDUPLICATE_INSTRUCTIONS, self.language).format(
+                    plural=plural_type
+                )
+
                 item: str = dspy.InputField()
                 set: list[str] = dspy.InputField()
+                # `desc`, not `description`: dspy reads `desc` and silently
+                # ignores anything else, so the old `description=` never
+                # reached the prompt at all.
                 duplicates: list[str] = dspy.OutputField(
-                    description="Exact matches to items in {plural_type} set"
+                    desc=_pick(_DUPLICATES_OUTPUT_DESC, self.language).format(
+                        plural=plural_type
+                    )
                 )
                 alias: str = dspy.OutputField(
-                    description=f"Best {singular_type} name to represent the duplicates, ideally from the {plural_type} set"
+                    desc=_pick(_ALIAS_OUTPUT_DESC, self.language).format(
+                        singular=singular_type, plural=plural_type
+                    )
                 )
 
             # with dspy.context(lm=self.lm):

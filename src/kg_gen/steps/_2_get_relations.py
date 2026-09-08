@@ -5,6 +5,8 @@ import dspy
 import litellm
 from pydantic import BaseModel, create_model, ValidationError
 
+from kg_gen.utils.i18n import pick as _pick
+
 
 def parse_relations_response(
     raw_json: str,
@@ -70,9 +72,153 @@ def parse_relations_response(
     return relations
 
 
-def _load_relations_prompt() -> str:
+_RELATIONS_PROMPT_FILES = {"es": "relaciones.txt", "en": "relations.txt"}
+
+# Inline instructions for the default dspy.Predict path (as opposed to the
+# litellm path, which loads the more elaborate prompts/relations.txt or
+# relaciones.txt files). Kept language-selectable independent of the
+# TextNormalizer/dedup lemmatization pipeline, which is unrelated.
+_TEXT_RELATIONS_INSTRUCTIONS = {
+    "en": """Extract subject-predicate-object triples from the source text.
+      Subject and object must be from entities list. Entities provided were previously extracted from the same source text.
+      This is for an extraction task, please be thorough, accurate, and faithful to the reference text.""",
+    "es": """Extrae tripletas sujeto-predicado-objeto del texto fuente.
+      El sujeto y el objeto deben ser una entidad de la lista de entidades. Las entidades fueron previamente extraídas de este mismo texto fuente.
+      Esta es una tarea de extracción: sé exhaustivo, preciso y fiel al texto de referencia.""",
+}
+
+_CONVERSATION_RELATIONS_INSTRUCTIONS = {
+    "en": """Extract subject-predicate-object triples from the conversation, including:
+      1. Relations between concepts discussed
+      2. Relations between speakers and concepts (e.g. user asks about X)
+      3. Relations between speakers (e.g. assistant responds to user)
+      Subject and object must be from entities list. Entities provided were previously extracted from the same source text.
+      This is for an extraction task, please be thorough, accurate, and faithful to the reference text.""",
+    "es": """Extrae tripletas sujeto-predicado-objeto de la conversación, incluyendo:
+      1. Relaciones entre los conceptos discutidos
+      2. Relaciones entre los interlocutores y los conceptos (ej. el usuario pregunta sobre X)
+      3. Relaciones entre los interlocutores (ej. el asistente responde al usuario)
+      El sujeto y el objeto deben ser una entidad de la lista de entidades. Las entidades fueron previamente extraídas de este mismo texto fuente.
+      Esta es una tarea de extracción: sé exhaustivo, preciso y fiel al texto de referencia.""",
+}
+
+_FIXED_RELATIONS_INSTRUCTIONS = {
+    "en": "Fix the relations so that every subject and object of the relations are exact matches to an entity. Keep the predicate the same. The meaning of every relation should stay faithful to the reference text. If you cannot maintain the meaning of the original relation relative to the source text, then do not return it.",
+    "es": "Corrige las relaciones para que el sujeto y el objeto de cada una coincidan exactamente con una entidad. Mantén el mismo predicado. El significado de cada relación debe seguir siendo fiel al texto de referencia. Si no puedes conservar el significado de la relación original respecto al texto fuente, no la devuelvas.",
+}
+
+# User-turn wrapper for the litellm path. The XML-ish tags are structural and
+# stay untranslated; only the prose around them varies by language.
+# Filled with str.replace rather than str.format: the source text is
+# arbitrary user input and a stray "{" in it would blow up .format().
+_RELATIONS_USER_PROMPT = {
+    "en": """
+Here is the list of entities that were previously extracted from the source text:
+
+<entities>
+{entities_str}
+</entities>
+
+Here is the source text to analyze:
+
+<text>
+{input_data}
+</text>
+    """,
+    "es": """
+Esta es la lista de entidades extraídas previamente del texto fuente:
+
+<entities>
+{entities_str}
+</entities>
+
+Este es el texto fuente que debes analizar:
+
+<text>
+{input_data}
+</text>
+    """,
+}
+
+_RELATIONS_OUTPUT_DESC = {
+    "en": "List of subject-predicate-object tuples. Be thorough.",
+    "es": "Lista de tripletas sujeto-predicado-objeto. Sé exhaustivo.",
+}
+
+_CONVERSATION_RELATIONS_OUTPUT_DESC = {
+    "en": "List of subject-predicate-object tuples where subject and object are exact matches to items in entities list. Be thorough",
+    "es": "Lista de tripletas sujeto-predicado-objeto donde el sujeto y el objeto coinciden exactamente con elementos de la lista de entidades. Sé exhaustivo.",
+}
+
+_RELATION_DOC = {
+    "en": "Knowledge graph subject-predicate-object tuple.",
+    "es": "Tripleta sujeto-predicado-objeto de un grafo de conocimiento.",
+}
+
+_FALLBACK_RELATION_DOC = {
+    "en": "Knowledge graph subject-predicate-object tuple. Subject and object entities must be one of: {entities_str}",
+    "es": "Tripleta sujeto-predicado-objeto de un grafo de conocimiento. El sujeto y el objeto deben ser una de estas entidades: {entities_str}",
+}
+
+_RELATION_FIELD_DESCS = {
+    "en": {
+        "subject": "Subject entity",
+        "predicate": "Predicate",
+        "object": "Object entity",
+    },
+    "es": {
+        "subject": "Entidad sujeto",
+        "predicate": "Predicado",
+        "object": "Entidad objeto",
+    },
+}
+
+# These are few-shot examples embedded in every prompt, so the predicate
+# example is what tells the model which language to emit predicates in.
+# An English "is brother of" pulls the output toward English regardless of
+# how the instructions are worded.
+_RELATION_EXAMPLES = {
+    "en": {
+        "subject": ["Kevin"],
+        "predicate": ["is brother of"],
+        "object": ["Vicky"],
+    },
+    "es": {
+        "subject": ["Carlos"],
+        "predicate": ["es hermano de"],
+        "object": ["Lucía"],
+    },
+}
+
+
+def _relation_model(language: str, doc: Optional[str] = None) -> Type[BaseModel]:
+    """Build the subject-predicate-object model with language-appropriate
+    field descriptions and few-shot examples.
+
+    `doc` overrides the class docstring; the fallback path uses it to inline
+    the allowed entity list.
+    """
+    descs = _pick(_RELATION_FIELD_DESCS, language)
+    examples = _pick(_RELATION_EXAMPLES, language)
+
+    class Relation(BaseModel):
+        __doc__ = doc if doc is not None else _pick(_RELATION_DOC, language)
+
+        subject: str = dspy.InputField(
+            desc=descs["subject"], examples=examples["subject"]
+        )
+        predicate: str = dspy.InputField(
+            desc=descs["predicate"], examples=examples["predicate"]
+        )
+        object: str = dspy.InputField(desc=descs["object"], examples=examples["object"])
+
+    return Relation
+
+
+def _load_relations_prompt(language: str = "en") -> str:
     """Load the relations prompt template from file."""
-    prompt_path = Path(__file__).parent.parent / "prompts" / "relations.txt"
+    filename = _RELATIONS_PROMPT_FILES.get(language, "relations.txt")
+    prompt_path = Path(__file__).parent.parent / "prompts" / filename
     return prompt_path.read_text()
 
 
@@ -105,22 +251,15 @@ def _get_relations_litellm(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     temperature: float = 0.0,
+    language: str = "en",
 ) -> List[Tuple[str, str, str]]:
-    prompt_template = _load_relations_prompt()
+    prompt_template = _load_relations_prompt(language)
     entities_str = "\n".join(f"- {e}" for e in entities)
-    user_prompt = f"""
-Here is the list of entities that were previously extracted from the source text:
-
-<entities>
-{entities_str}
-</entities>
-
-Here is the source text to analyze:
-
-<text>
-{input_data}
-</text>
-    """
+    user_prompt = (
+        _pick(_RELATIONS_USER_PROMPT, language)
+        .replace("{entities_str}", entities_str)
+        .replace("{input_data}", input_data)
+    )
 
     # Create dynamic model with entity constraints
     _, RelationsResponse = _create_relations_model(entities)
@@ -162,57 +301,53 @@ Here is the source text to analyze:
 
 
 def extraction_sig(
-    Relation: BaseModel, is_conversation: bool, context: str = ""
+    Relation: BaseModel,
+    is_conversation: bool,
+    context: str = "",
+    language: str = "en",
 ) -> dspy.Signature:
     if not is_conversation:
+        instructions = _pick(_TEXT_RELATIONS_INSTRUCTIONS, language)
 
         class ExtractTextRelations(dspy.Signature):
-            __doc__ = f"""Extract subject-predicate-object triples from the source text. 
-      Subject and object must be from entities list. Entities provided were previously extracted from the same source text.
-      This is for an extraction task, please be thorough, accurate, and faithful to the reference text. {context}"""
+            __doc__ = f"{instructions} {context}"
 
             source_text: str = dspy.InputField()
             entities: list[str] = dspy.InputField()
             relations: list[Relation] = dspy.OutputField(
-                desc="List of subject-predicate-object tuples. Be thorough."
+                desc=_pick(_RELATIONS_OUTPUT_DESC, language)
             )
 
         return ExtractTextRelations
     else:
+        instructions = _pick(_CONVERSATION_RELATIONS_INSTRUCTIONS, language)
 
         class ExtractConversationRelations(dspy.Signature):
-            __doc__ = f"""Extract subject-predicate-object triples from the conversation, including:
-      1. Relations between concepts discussed
-      2. Relations between speakers and concepts (e.g. user asks about X)
-      3. Relations between speakers (e.g. assistant responds to user)
-      Subject and object must be from entities list. Entities provided were previously extracted from the same source text.
-      This is for an extraction task, please be thorough, accurate, and faithful to the reference text. {context}"""
+            __doc__ = f"{instructions} {context}"
 
             source_text: str = dspy.InputField()
             entities: list[str] = dspy.InputField()
             relations: list[Relation] = dspy.OutputField(
-                desc="List of subject-predicate-object tuples where subject and object are exact matches to items in entities list. Be thorough"
+                desc=_pick(_CONVERSATION_RELATIONS_OUTPUT_DESC, language)
             )
 
         return ExtractConversationRelations
 
 
 def fallback_extraction_sig(
-    entities, is_conversation, context: str = ""
+    entities, is_conversation, context: str = "", language: str = "en"
 ) -> dspy.Signature:
     """This fallback extraction does not strictly type the subject and object strings."""
 
     entities_str = "\n- ".join(entities)
 
-    class Relation(BaseModel):
-        # TODO: should use literal's here instead.
-        __doc__ = f"""Knowledge graph subject-predicate-object tuple. Subject and object entities must be one of: {entities_str}"""
+    # TODO: should use literal's here instead.
+    Relation = _relation_model(
+        language,
+        doc=_pick(_FALLBACK_RELATION_DOC, language).format(entities_str=entities_str),
+    )
 
-        subject: str = dspy.InputField(desc="Subject entity", examples=["Kevin"])
-        predicate: str = dspy.InputField(desc="Predicate", examples=["is brother of"])
-        object: str = dspy.InputField(desc="Object entity", examples=["Vicky"])
-
-    return Relation, extraction_sig(Relation, is_conversation, context)
+    return Relation, extraction_sig(Relation, is_conversation, context, language)
 
 
 def _filter_entities(entities: List[str]) -> List[str]:
@@ -230,6 +365,7 @@ def get_relations(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     temperature: float = 0.0,
+    language: str = "en",
 ) -> List[Tuple[str, str, str]]:
     # Filter out entities containing backslashes
     entities = _filter_entities(entities)
@@ -242,16 +378,12 @@ def get_relations(
             api_key=api_key,
             api_base=api_base,
             temperature=temperature,
+            language=language,
         )
 
-    class Relation(BaseModel):
-        """Knowledge graph subject-predicate-object tuple."""
+    Relation = _relation_model(language)
 
-        subject: str = dspy.InputField(desc="Subject entity", examples=["Kevin"])
-        predicate: str = dspy.InputField(desc="Predicate", examples=["is brother of"])
-        object: str = dspy.InputField(desc="Object entity", examples=["Vicky"])
-
-    ExtractRelations = extraction_sig(Relation, is_conversation, context)
+    ExtractRelations = extraction_sig(Relation, is_conversation, context, language)
 
     try:
         extract = dspy.Predict(ExtractRelations)
@@ -261,13 +393,13 @@ def get_relations(
     except Exception as _:
         # print("get_relations: fallback extraction")
         Relation, ExtractRelations = fallback_extraction_sig(
-            entities, is_conversation, context
+            entities, is_conversation, context, language
         )
         extract = dspy.Predict(ExtractRelations)
         result = extract(source_text=input_data, entities=entities)
 
         class FixedRelations(dspy.Signature):
-            """Fix the relations so that every subject and object of the relations are exact matches to an entity. Keep the predicate the same. The meaning of every relation should stay faithful to the reference text. If you cannot maintain the meaning of the original relation relative to the source text, then do not return it."""
+            __doc__ = _pick(_FIXED_RELATIONS_INSTRUCTIONS, language)
 
             source_text: str = dspy.InputField()
             entities: list[str] = dspy.InputField()

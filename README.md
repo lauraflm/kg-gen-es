@@ -205,6 +205,52 @@ clustered_graph = kg.cluster(
 )
 ```
 
+### Multilingual Support (e.g. Spanish)
+`kg-gen` can be tuned for non-English text via two parameters, either at `KGGen(...)` init time or per-call in `generate()`/`deduplicate()`:
+- `language`: language code (e.g. `"es"`). Selects the language of every prompt sent to the LLM, plus the sentence splitter and lemmatization rules. Defaults to `"en"`.
+- `semhash_model_name`: HuggingFace [Model2Vec](https://github.com/MinishLab/model2vec) encoder used by SemHash. For multilingual/Spanish text, use `"minishlab/potion-multilingual-128M"` instead of the English-only SemHash default.
+
+```python
+kg = KGGen(
+  model="gemini/gemini-2.5-flash",
+  retrieval_model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # multilingual embeddings for LM-based dedup
+  language="es",
+  semhash_model_name="minishlab/potion-multilingual-128M",
+)
+
+graph = kg.generate("Gabriel García Márquez nació en Aracataca, Colombia. Es el autor de Cien años de soledad.")
+```
+
+Currently supported: `"en"` and `"es"`.
+
+#### What `language` affects
+| Stage | Effect |
+| --- | --- |
+| Entity extraction | Instructions and field descriptions of the extraction signature |
+| Relation extraction | Instructions, field descriptions, and the few-shot `subject`/`predicate`/`object` examples — these examples are what steer the language the model emits predicates in |
+| Chunking | Picks the matching NLTK punkt sentence tokenizer |
+| Dedup normalization | spaCy lemmatization: nouns for entities, nouns and verbs for predicates, so conjugation and number variants collapse before matching |
+| LLM-based dedup | Instructions of the signature that picks each cluster's alias — i.e. the entity's final name in the graph |
+
+`language` does **not** choose the embedding models. `semhash_model_name` and `retrieval_model` are set separately; leaving them at their English-only defaults while setting `language="es"` will hurt dedup quality.
+
+Prompt files [`prompts/entidades.txt`](src/kg_gen/prompts/entidades.txt) and [`prompts/relaciones.txt`](src/kg_gen/prompts/relaciones.txt) are the Spanish counterparts of `entities.txt`/`relations.txt`, and are used only on the `no_dspy=True` (litellm) path.
+
+#### Requirements and fallback behavior
+Non-English `language` values require a spaCy model for lemmatization (Spanish uses `es_core_news_md`). Install it separately, since spaCy models aren't installed as regular pip dependencies:
+```bash
+python -m spacy download es_core_news_md
+```
+
+An unsupported `language` code raises `ValueError` when `KGGen` is constructed, or when passed as a per-call override — before any LLM calls are made.
+
+#### Adding a language
+1. Add the spaCy model to `_SPACY_MODELS` in [`utils/text_normalization.py`](src/kg_gen/utils/text_normalization.py) and install it.
+2. Add the punkt language name to `_PUNKT_LANGUAGES` in [`utils/chunk_text.py`](src/kg_gen/utils/chunk_text.py).
+3. Add a key to each prompt table in [`steps/_1_get_entities.py`](src/kg_gen/steps/_1_get_entities.py), [`steps/_2_get_relations.py`](src/kg_gen/steps/_2_get_relations.py), and [`utils/llm_deduplicate.py`](src/kg_gen/utils/llm_deduplicate.py). Any table missing the key falls back to English via `pick()` in [`utils/i18n.py`](src/kg_gen/utils/i18n.py), so a partial translation degrades rather than breaking.
+4. Optionally add `prompts/<entities>.txt` and `prompts/<relations>.txt` for the `no_dspy=True` path.
+5. Add the code to `SUPPORTED_LANGUAGES` in [`utils/i18n.py`](src/kg_gen/utils/i18n.py). Do this last: it is what makes the code accepted at all, so registering it before the steps above turns a clear "unsupported language" error into silent English fallbacks.
+
 ### Aggregating Multiple Graphs
 You can combine multiple graphs using the aggregate method:
 ```python

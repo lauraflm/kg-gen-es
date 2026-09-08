@@ -1,0 +1,34 @@
+Extraerás entidades de un artículo para construir un grafo de conocimiento. Tu tarea es identificar las entidades importantes mencionadas en el artículo que probablemente tengan relaciones significativas con otras entidades, y devolverlas como una lista sin duplicados.
+
+## Categorías de entidades
+
+Al analizar el artículo, considera entidades pertenecientes a las siguientes categorías:
+
+* **Personas**: Personas individuales (figuras históricas, celebridades, autores, políticos, etc.).
+* **Organizaciones**: Empresas, instituciones, organismos gubernamentales, bandas, equipos deportivos, organizaciones sin fines de lucro, etc.
+* **Lugares**: Ciudades, países, regiones, monumentos, accidentes geográficos, edificios.
+* **Fechas y períodos de tiempo**: Fechas específicas, años o períodos temporales.
+* **Eventos**: Guerras, conferencias, ceremonias, festivales, competiciones, etc.
+* **Obras creativas**: Libros, películas, canciones, álbumes, obras de arte, publicaciones, programas de televisión.
+* **Conceptos**: Ideas, teorías, movimientos, filosofías, áreas de estudio, religiones.
+* **Productos**: Tecnologías, inventos, software, dispositivos.
+
+## Directrices de extracción
+
+Sigue estas reglas al identificar entidades:
+
+1. **Céntrate en menciones sustantivas**: Extrae entidades que sean centrales para el tema del artículo O que sean mencionadas con un nivel significativo de detalle o contexto. Omite las entidades que aparezcan únicamente de pasada y sin contexto.
+
+2. **Prioriza entidades con potencial de relación**: Dado que estas entidades se utilizarán para construir un grafo de conocimiento, incluye únicamente aquellas que probablemente tengan relaciones claras con otras entidades del artículo. Una entidad mencionada de forma aislada y sin conexiones con la narrativa principal del artículo normalmente debería excluirse.
+
+3. **Utiliza nombres oficiales o de uso común**: Usa el nombre oficial o más ampliamente reconocido de cada entidad, según aparezca en el artículo.
+
+4. **Evita términos excesivamente genéricos**: No extraigas términos genéricos como `"ciudad"`, `"libro"` o `"persona"`, a menos que estén definidos específicamente como conceptos que se estén discutiendo en el artículo.
+
+5. **Utiliza nombres completos para las personas**: Extrae los nombres completos tal como aparecen por primera vez (por ejemplo, `"Marie Curie"` en lugar de simplemente `"Curie"`).
+
+6. **Normaliza los nombres de las entidades**: Si una entidad aparece con varios nombres o variantes dentro del artículo, selecciona una única forma canónica. Por ejemplo, normaliza `"U.S."`, `"USA"` y `"United States of America"` como `"Estados Unidos"`.
+
+7. **Extrae cada entidad única una sola vez**: Aunque una entidad aparezca varias veces, inclúyela solo una vez en la salida final.
+
+8. **Sé selectivo en lugar de inclusivo**: Cuando exista duda sobre si una entidad cumple los criterios, especialmente en lo relativo a su potencial de relación, opta por excluirla en lugar de incluirla. Es preferible contar con un conjunto acotado de entidades bien conectadas que con una lista exhaustiva que contenga muchas menciones aisladas.

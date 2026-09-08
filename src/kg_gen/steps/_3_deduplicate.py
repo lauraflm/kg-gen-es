@@ -1,3 +1,5 @@
+from typing import Optional
+
 from kg_gen.models import Graph
 from kg_gen.utils.deduplicate import run_semhash_deduplication
 from kg_gen.utils.llm_deduplicate import LLMDeduplicate
@@ -20,23 +22,33 @@ def run_deduplication(
     method: DeduplicateMethod = DeduplicateMethod.FULL,
     retrieval_model: SentenceTransformer | None = None,
     semhash_similarity_threshold: float = 0.95,
+    language: str = "en",
+    semhash_model_name: Optional[str] = None,
 ) -> Graph:
     if method != DeduplicateMethod.SEMHASH and retrieval_model is None:
         raise ValueError("No retrieval model provided")
 
     if method == DeduplicateMethod.SEMHASH:
         deduplicated_graph = run_semhash_deduplication(
-            graph, semhash_similarity_threshold
+            graph,
+            semhash_similarity_threshold,
+            language=language,
+            semhash_model_name=semhash_model_name,
         )
     elif method == DeduplicateMethod.LM_BASED:
-        llm_deduplicate = LLMDeduplicate(retrieval_model, lm, graph)
+        llm_deduplicate = LLMDeduplicate(retrieval_model, lm, graph, language=language)
         llm_deduplicate.cluster()
         deduplicated_graph = llm_deduplicate.deduplicate()
     elif method == DeduplicateMethod.FULL:
         deduplicated_graph = run_semhash_deduplication(
-            graph, semhash_similarity_threshold
+            graph,
+            semhash_similarity_threshold,
+            language=language,
+            semhash_model_name=semhash_model_name,
         )
-        llm_deduplicate = LLMDeduplicate(retrieval_model, lm, deduplicated_graph)
+        llm_deduplicate = LLMDeduplicate(
+            retrieval_model, lm, deduplicated_graph, language=language
+        )
         llm_deduplicate.cluster()
         deduplicated_graph = llm_deduplicate.deduplicate()
 

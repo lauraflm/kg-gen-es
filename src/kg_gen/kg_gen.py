@@ -7,6 +7,7 @@ from kg_gen.steps._3_deduplicate import run_deduplication, DeduplicateMethod
 from kg_gen.utils.chunk_text import chunk_text
 from kg_gen.utils.visualize_kg import visualize as visualize_kg
 from kg_gen.models import Graph
+from kg_gen.utils.i18n import validate_language
 import dspy
 import json
 import os
@@ -36,6 +37,9 @@ class KGGen:
         api_base: str = None,
         retrieval_model: Optional[str] = None,
         disable_cache: bool = False,
+        # ---- Multilingual params ----
+        language: str = "en",
+        semhash_model_name: Optional[str] = None,
     ):
         """Initialize KGGen with optional model configuration
 
@@ -44,6 +48,10 @@ class KGGen:
             temperature: Temperature for model sampling
             api_key: API key for model access
             api_base: Specify the base URL endpoint for making API calls to a language model service
+            language: Language code for text normalization in dedup ("en", "es", etc.)
+            semhash_model_name: HuggingFace model name for SemHash encoder.
+                If None, uses SemHash default (potion-base-8M).
+                For multilingual: "minishlab/potion-multilingual-128M".
         """
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -54,6 +62,8 @@ class KGGen:
         self.retrieval_model: Optional[SentenceTransformer] = None
         self.lm = None
         self.disable_cache = disable_cache
+        self.language = validate_language(language)
+        self.semhash_model_name = semhash_model_name
 
         self.init_model(
             model=model,
@@ -68,6 +78,16 @@ class KGGen:
     def validate_temperature(self, temperature: float):
         if "gpt-5" in self.model and temperature < 1.0:
             raise ValueError("Temperature must be 1.0 for gpt-5 family models")
+
+    def _resolve_language(self, language: Optional[str]) -> str:
+        """Resolve a per-call language override against the instance default.
+
+        The override is validated here rather than deeper in the pipeline so
+        that an unusable code raises before any LLM calls are made.
+        """
+        if language is None:
+            return self.language
+        return validate_language(language)
 
     def validate_max_tokens(self, max_tokens: int):
         if "gpt-5" in self.model and max_tokens < 16000:
@@ -165,6 +185,9 @@ class KGGen:
         temperature: float = None,
         output_folder: Optional[str] = None,
         no_dspy: bool = False,
+        # ---- Multilingual overrides (optional, defaults to instance values) ----
+        language: Optional[str] = None,
+        semhash_model_name: Optional[str] = None,
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -175,10 +198,16 @@ class KGGen:
             chunk_size: Max size of text chunks in characters to process
             context: Description of data context
             output_folder: Path to save partial progress
+            language: Override instance language for this call
+            semhash_model_name: Override instance semhash model for this call
 
         Returns:
             Graph: Generated knowledge graph
         """
+
+        # Resolve multilingual params (call-level override > instance default)
+        _language = self._resolve_language(language)
+        _semhash_model_name = semhash_model_name or self.semhash_model_name
 
         # Process input data
         is_conversation = isinstance(input_data, list)
@@ -224,6 +253,7 @@ class KGGen:
                     temperature=temperature
                     if temperature is not None
                     else self.temperature,
+                    language=_language,
                 )
                 relations = get_relations(
                     content,
@@ -236,6 +266,7 @@ class KGGen:
                     temperature=temperature
                     if temperature is not None
                     else self.temperature,
+                    language=_language,
                 )
                 return entities, relations
 
@@ -252,7 +283,7 @@ class KGGen:
                     raise e
 
         if chunk_size:
-            chunks = chunk_text(processed_input, chunk_size)
+            chunks = chunk_text(processed_input, chunk_size, language=_language)
             entities = set()
             relations = set()
 
@@ -274,7 +305,11 @@ class KGGen:
 
         if deduplication_method:
             graph = self.deduplicate(
-                graph, method=deduplication_method, context=context
+                graph,
+                method=deduplication_method,
+                context=context,
+                language=_language,
+                semhash_model_name=_semhash_model_name,
             )
 
         if output_folder:
@@ -299,7 +334,14 @@ class KGGen:
         api_key: str = None,
         api_base: str = None,
         context: str = "",  # TODO: implement context
+        # ---- Multilingual params ----
+        language: Optional[str] = None,
+        semhash_model_name: Optional[str] = None,
     ) -> Graph:
+        # Resolve multilingual params
+        _language = self._resolve_language(language)
+        _semhash_model_name = semhash_model_name or self.semhash_model_name
+
         # Reinitialize dspy with new parameters if any are provided
         if any([model, temperature, api_key, api_base]):
             self.init_model(
@@ -315,6 +357,8 @@ class KGGen:
             method=method,
             retrieval_model=self.retrieval_model,
             semhash_similarity_threshold=semhash_similarity_threshold,
+            language=_language,
+            semhash_model_name=_semhash_model_name,
         )
 
     def aggregate(self, graphs: list[Graph]) -> Graph:
@@ -459,7 +503,15 @@ class KGGen:
             "edge_clusters": {k: list(v) for k, v in graph.edge_clusters.items()}
             if graph.edge_clusters
             else None,
-            "entity_metadata": graph.entity_metadata,
+            # entity_metadata is dict[str, set] and json.dump cannot serialize
+            # sets, so exporting a graph that has any metadata raises. Nothing
+            # in the pipeline populates the field -- it is a pass-through for
+            # caller-supplied metadata -- which is why the bug goes unnoticed:
+            # the value is normally None. `sorted` rather than `list` keeps the
+            # exported file stable across runs, since set order is not.
+            "entity_metadata": {k: sorted(v) for k, v in graph.entity_metadata.items()}
+            if graph.entity_metadata
+            else None,
         }
 
         with open(output_path, "w") as f:

@@ -4,22 +4,76 @@ import dspy
 import litellm
 from pydantic import BaseModel
 
+from kg_gen.utils.i18n import pick as _pick
 
-class TextEntities(dspy.Signature):
-    """Extract key entities from the source text. Extracted entities are subjects or objects.
-    This is for an extraction task, please be THOROUGH and accurate to the reference text."""
+_TEXT_ENTITIES_INSTRUCTIONS = {
+    "en": """Extract key entities from the source text. Extracted entities are subjects or objects.
+    This is for an extraction task, please be THOROUGH and accurate to the reference text.""",
+    "es": """Extrae las entidades clave del texto fuente. Las entidades extraídas son sujetos u objetos.
+    Esta es una tarea de extracción: sé EXHAUSTIVO y preciso respecto al texto de referencia.""",
+}
 
-    source_text: str = dspy.InputField()
-    entities: list[str] = dspy.OutputField(desc="THOROUGH list of key entities")
-
-
-class ConversationEntities(dspy.Signature):
-    """Extract key entities from the conversation Extracted entities are subjects or objects.
+_CONVERSATION_ENTITIES_INSTRUCTIONS = {
+    "en": """Extract key entities from the conversation Extracted entities are subjects or objects.
     Consider both explicit entities and participants in the conversation.
-    This is for an extraction task, please be THOROUGH and accurate."""
+    This is for an extraction task, please be THOROUGH and accurate.""",
+    "es": """Extrae las entidades clave de la conversación. Las entidades extraídas son sujetos u objetos.
+    Considera tanto las entidades explícitas como los participantes de la conversación.
+    Esta es una tarea de extracción: sé EXHAUSTIVO y preciso.""",
+}
 
-    source_text: str = dspy.InputField()
-    entities: list[str] = dspy.OutputField(desc="THOROUGH list of key entities")
+_ENTITIES_OUTPUT_DESC = {
+    "en": "THOROUGH list of key entities",
+    "es": "Lista EXHAUSTIVA de entidades clave",
+}
+
+_ENTITIES_PROMPT_FILES = {"es": "entidades.txt", "en": "entities.txt"}
+
+# User-turn wrapper for the litellm path. The XML-ish tags are structural and
+# stay untranslated; only the prose around them varies by language.
+# Filled with str.replace rather than str.format: the source text is
+# arbitrary user input and a stray "{" in it would blow up .format().
+_ENTITIES_USER_PROMPT = {
+    "en": """
+Here is the text to extract entities from:
+
+<article>
+{input_data}
+</article>
+    """,
+    "es": """
+Este es el texto del que debes extraer entidades:
+
+<article>
+{input_data}
+</article>
+    """,
+}
+
+
+def _entities_sig(is_conversation: bool, language: str = "en") -> dspy.Signature:
+    """Build the entity-extraction signature for the requested language.
+
+    Replaces upstream's two fixed signature classes (TextEntities /
+    ConversationEntities); the fields are identical, only the instructions
+    and field descriptions vary by language.
+    """
+    instructions = _pick(
+        _CONVERSATION_ENTITIES_INSTRUCTIONS
+        if is_conversation
+        else _TEXT_ENTITIES_INSTRUCTIONS,
+        language,
+    )
+
+    class EntitiesSignature(dspy.Signature):
+        __doc__ = instructions
+
+        source_text: str = dspy.InputField()
+        entities: list[str] = dspy.OutputField(
+            desc=_pick(_ENTITIES_OUTPUT_DESC, language)
+        )
+
+    return EntitiesSignature
 
 
 class EntitiesResponse(BaseModel):
@@ -28,9 +82,10 @@ class EntitiesResponse(BaseModel):
     entities: List[str]
 
 
-def _load_entities_prompt() -> str:
+def _load_entities_prompt(language: str = "en") -> str:
     """Load the entities prompt template from file."""
-    prompt_path = Path(__file__).parent.parent / "prompts" / "entities.txt"
+    filename = _ENTITIES_PROMPT_FILES.get(language, "entities.txt")
+    prompt_path = Path(__file__).parent.parent / "prompts" / filename
     return prompt_path.read_text()
 
 
@@ -40,15 +95,12 @@ def _get_entities_litellm(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     temperature: float = 0.0,
+    language: str = "en",
 ) -> List[str]:
-    prompt_template = _load_entities_prompt()
-    user_prompt = f"""
-Here is the text to extract entities from:
-
-<article>
-{input_data}
-</article>
-    """
+    prompt_template = _load_entities_prompt(language)
+    user_prompt = _pick(_ENTITIES_USER_PROMPT, language).replace(
+        "{input_data}", input_data
+    )
 
     # Build schema with additionalProperties: false (required by OpenAI)
     schema = EntitiesResponse.model_json_schema()
@@ -90,6 +142,7 @@ def get_entities(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     temperature: float = 0.0,
+    language: str = "en",
 ) -> List[str]:
     if use_litellm_prompt and not is_conversation:
         return _get_entities_litellm(
@@ -98,12 +151,10 @@ def get_entities(
             api_key=api_key,
             api_base=api_base,
             temperature=temperature,
+            language=language,
         )
 
-    extract = (
-        dspy.Predict(ConversationEntities)
-        if is_conversation
-        else dspy.Predict(TextEntities)
-    )
+    EntitiesSignature = _entities_sig(is_conversation, language)
+    extract = dspy.Predict(EntitiesSignature)
     result = extract(source_text=input_data)
     return result.entities
