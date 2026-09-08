@@ -105,6 +105,15 @@ class LLMDeduplicate:
     ) -> list[str]:
         """
         Use rank fusion of BM25 + embedding to retrieve top-k nodes.
+
+        Deliberately identical to upstream kg-gen for every language, despite
+        two known weaknesses: the BM25 tokenizer folds neither accents nor
+        punctuation, and the two score sets are summed at raw scale, so the
+        unbounded BM25 half dominates the bounded cosine half. Both are left
+        alone because changing candidate retrieval alters which items the LLM
+        ever compares, in every language -- an algorithmic change rather than
+        a linguistic adaptation. See "What `language` deliberately does not
+        affect" in the README before touching this.
         """
         query_tokens = query.lower().split()
 
@@ -283,6 +292,25 @@ class LLMDeduplicate:
             # Filter duplicates to only include those that exist in the cluster
             duplicates = [dup for dup in result.duplicates if dup in cluster]
 
+            # Always key the cluster by the alias, and merge rather than
+            # assign. Both details are needed to keep every item in
+            # `item_clusters` reachable from the name that actually enters the
+            # graph, since `items` above takes the alias unconditionally:
+            #
+            #   - Keying by `item` when no duplicates were found stranded the
+            #     item whenever the alias differed from it ("libros" -> alias
+            #     "libro"): the graph gained "libro" while relations still
+            #     said "libros", and the remap below bridges neither.
+            #   - Assigning would drop the members already recorded for an
+            #     alias, since two items in one cluster (or two clusters
+            #     processed in parallel) can resolve to the same one.
+            #
+            # Either way the orphaned members match no entry in the remap
+            # below, leaving relations that point at entities absent from the
+            # graph. `entities` itself is unaffected by this bookkeeping.
+            members = item_clusters.setdefault(result.alias, set())
+            members.add(item)
+
             if len(duplicates) > 0:
                 self.logger.debug(
                     "  ✓ Found %s duplicates for '%s'", len(duplicates), item
@@ -293,15 +321,13 @@ class LLMDeduplicate:
                     item,
                     duplicates,
                 )
-                item_clusters[result.alias] = {item}
                 for duplicate in duplicates:
                     cluster.remove(duplicate)
-                    item_clusters[result.alias].add(duplicate)
+                    members.add(duplicate)
             else:
                 self.logger.debug(
                     "  ✗ No duplicates found for '%s', keeping as is", item
                 )
-                item_clusters[item] = {item}
 
         self.logger.debug(
             "Deduplication complete: %s unique %s from original %s",
@@ -311,6 +337,20 @@ class LLMDeduplicate:
         )
 
         return items, item_clusters
+
+    @staticmethod
+    def _merge_clusters(
+        target: dict[str, set[str]], source: dict[str, set[str]]
+    ) -> None:
+        """Fold `source` into `target`, unioning members on key collision.
+
+        `dict.update` would keep only the last cluster recorded for an alias,
+        silently discarding the members of every earlier one. Clusters are
+        deduplicated independently and in parallel, so the same alias
+        legitimately arises in more than one of them.
+        """
+        for alias, members in source.items():
+            target.setdefault(alias, set()).update(members)
 
     def deduplicate(self) -> Graph:
         # Check if intermediate progress exists and load it
@@ -340,7 +380,7 @@ class LLMDeduplicate:
             try:
                 cluster_entities, cluster_entity_map = future.result()
                 entities.update(cluster_entities)
-                entity_clusters.update(cluster_entity_map)
+                self._merge_clusters(entity_clusters, cluster_entity_map)
             except Exception as e:
                 self.logger.error("Error processing node cluster %s: %s", i, e)
 
@@ -349,7 +389,7 @@ class LLMDeduplicate:
             try:
                 cluster_edges, cluster_edge_map = future.result()
                 edges.update(cluster_edges)
-                edge_clusters.update(cluster_edge_map)
+                self._merge_clusters(edge_clusters, cluster_edge_map)
             except Exception as e:
                 self.logger.error("Error processing edge cluster %s: %s", i, e)
 

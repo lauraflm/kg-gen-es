@@ -236,6 +236,30 @@ Currently supported: `"en"` and `"es"`.
 
 Prompt files [`prompts/entidades.txt`](src/kg_gen/prompts/entidades.txt) and [`prompts/relaciones.txt`](src/kg_gen/prompts/relaciones.txt) are the Spanish counterparts of `entities.txt`/`relations.txt`, and are used only on the `no_dspy=True` (litellm) path.
 
+#### What `language` deliberately does not affect
+The candidate retrieval inside LLM-based dedup (`get_relevant_items`) is left
+exactly as upstream kg-gen has it, for every language. Two known weaknesses
+were identified and **not** changed:
+
+- BM25 tokenizes with `text.lower().split()`, so it folds neither accents nor
+  punctuation: `México` and `Mexico` share no token.
+- BM25 and cosine scores are summed at raw scale (`0.5 * bm25 + 0.5 * cosine`).
+  BM25Okapi is unbounded while cosine is in [-1, 1], so the "equal weighting"
+  is dominated by BM25 — which is also the half that fails on morphological
+  variation, exactly what dedup exists to catch.
+
+Both are real, and neither is fixed here on purpose: changing candidate
+retrieval would alter which items the LLM ever gets to compare, in every
+language. That makes it an algorithmic change to kg-gen rather than a
+linguistic adaptation, and it would confound any measurement that attributes a
+difference in graph quality to the Spanish adaptation. Note that accent
+variants are already collapsed earlier by `TextNormalizer.fold()` on the
+SemHash path, which runs first under `DeduplicateMethod.FULL`.
+
+Bugs are treated differently from algorithm changes: the alias bookkeeping
+fixes in `deduplicate_cluster` and `_merge_clusters` apply to every language,
+so no configuration benefits from them over another.
+
 #### Requirements and fallback behavior
 Non-English `language` values require a spaCy model for lemmatization (Spanish uses `es_core_news_md`). Install it separately, since spaCy models aren't installed as regular pip dependencies:
 ```bash
