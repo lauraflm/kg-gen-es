@@ -5,6 +5,7 @@ from kg_gen.steps._1_get_entities import get_entities
 from kg_gen.steps._2_get_relations import get_relations
 from kg_gen.steps._3_deduplicate import run_deduplication, DeduplicateMethod
 from kg_gen.utils.chunk_text import chunk_text
+from kg_gen.utils.extraction_stats import ExtractionStats
 from kg_gen.utils.visualize_kg import visualize as visualize_kg
 from kg_gen.models import Graph
 from kg_gen.utils.i18n import validate_language
@@ -188,6 +189,7 @@ class KGGen:
         # ---- Multilingual overrides (optional, defaults to instance values) ----
         language: Optional[str] = None,
         semhash_model_name: Optional[str] = None,
+        stats: Optional[ExtractionStats] = None,
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -200,6 +202,8 @@ class KGGen:
             output_folder: Path to save partial progress
             language: Override instance language for this call
             semhash_model_name: Override instance semhash model for this call
+            stats: Optional counter collector for extraction diagnostics;
+                collecting never changes the extracted graph
 
         Returns:
             Graph: Generated knowledge graph
@@ -267,7 +271,13 @@ class KGGen:
                     if temperature is not None
                     else self.temperature,
                     language=_language,
+                    stats=stats,
                 )
+                # Recorded only once both steps succeeded, so a chunk retried
+                # after a context-length error is not counted twice.
+                if stats is not None:
+                    stats.record_chunk(content)
+                    stats.record_entities(len(entities))
                 return entities, relations
 
         if not chunk_size:

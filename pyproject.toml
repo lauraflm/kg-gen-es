@@ -76,3 +76,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "mcp/tests"]
+# Tests import `src.kg_gen`, so the repo root must be importable even when
+# pytest is launched as a bare `pytest` rather than `python -m pytest`.
+pythonpath = ["."]

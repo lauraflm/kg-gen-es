@@ -5,6 +5,7 @@ import dspy
 import litellm
 from pydantic import BaseModel, create_model, ValidationError
 
+from kg_gen.utils.extraction_stats import ExtractionStats
 from kg_gen.utils.i18n import pick as _pick
 
 
@@ -12,6 +13,7 @@ def parse_relations_response(
     raw_json: str,
     entities: List[str],
     response_model: Optional[Type[BaseModel]] = None,
+    stats: Optional[ExtractionStats] = None,
 ) -> List[Tuple[str, str, str]]:
     """
     Parse a relations JSON response with graceful fallback.
@@ -24,6 +26,7 @@ def parse_relations_response(
         raw_json: The raw JSON string from the LLM response
         entities: List of valid entity strings
         response_model: Optional Pydantic model for strict validation
+        stats: Optional counter collector; recording never changes the result
 
     Returns:
         List of (subject, predicate, object) tuples with valid entities
@@ -34,14 +37,23 @@ def parse_relations_response(
     if response_model is not None:
         try:
             parsed = response_model.model_validate_json(raw_json)
+            if stats is not None:
+                stats.record_relations(parsed.relations, entities)
             return [(r.subject, r.predicate, r.object) for r in parsed.relations]
         except ValidationError:
+            # Strict validation is what enforces the entity Literal, so this
+            # is the signal that some endpoint was not an exact match.
+            if stats is not None:
+                stats.increment("strict_validation_failed")
             pass  # Fall through to JSON parsing
 
     # Fallback: parse as raw JSON and filter
     try:
         data = json.loads(raw_json)
     except json.JSONDecodeError:
+        # The whole response is lost; how many triples it held is unknowable.
+        if stats is not None:
+            stats.increment("responses_json_invalid")
         return []
 
     # Handle both {"relations": [...]} and direct list formats
@@ -51,6 +63,7 @@ def parse_relations_response(
         return []
 
     relations = []
+    returned = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -61,13 +74,22 @@ def parse_relations_response(
 
         # Skip if missing required fields
         if not all([subject, predicate, obj]):
+            if stats is not None:
+                stats.increment("items_missing_field")
             continue
+
+        # Count before filtering, so the endpoint-mismatch rate is measured
+        # against what the model actually proposed rather than what survived.
+        returned.append((subject, predicate, obj))
 
         # Skip if subject or object not in valid entities
         if subject not in entities_set or obj not in entities_set:
             continue
 
         relations.append((subject, predicate, obj))
+
+    if stats is not None:
+        stats.record_relations(returned, entities)
 
     return relations
 
@@ -252,6 +274,7 @@ def _get_relations_litellm(
     api_base: Optional[str] = None,
     temperature: float = 0.0,
     language: str = "en",
+    stats: Optional[ExtractionStats] = None,
 ) -> List[Tuple[str, str, str]]:
     prompt_template = _load_relations_prompt(language)
     entities_str = "\n".join(f"- {e}" for e in entities)
@@ -297,7 +320,7 @@ def _get_relations_litellm(
 
     response = litellm.responses(**kwargs)
     raw_json = response.output[-1].content[0].text
-    return parse_relations_response(raw_json, entities, RelationsResponse)
+    return parse_relations_response(raw_json, entities, RelationsResponse, stats=stats)
 
 
 def extraction_sig(
@@ -366,11 +389,14 @@ def get_relations(
     api_base: Optional[str] = None,
     temperature: float = 0.0,
     language: str = "en",
+    stats: Optional[ExtractionStats] = None,
 ) -> List[Tuple[str, str, str]]:
     # Filter out entities containing backslashes
     entities = _filter_entities(entities)
 
     if use_litellm_prompt and not is_conversation:
+        if stats is not None:
+            stats.record_route("litellm")
         return _get_relations_litellm(
             input_data,
             entities,
@@ -379,7 +405,11 @@ def get_relations(
             api_base=api_base,
             temperature=temperature,
             language=language,
+            stats=stats,
         )
+
+    if stats is not None:
+        stats.record_route("dspy")
 
     Relation = _relation_model(language)
 
@@ -388,10 +418,19 @@ def get_relations(
     try:
         extract = dspy.Predict(ExtractRelations)
         result = extract(source_text=input_data, entities=entities)
+        # Note that this route returns the triples UNFILTERED: `Relation`
+        # declares subject and object as plain `str`, so nothing enforces
+        # that they are extracted entities. Any endpoint counted as missing
+        # here reaches the Graph as a relation pointing at an entity the
+        # graph does not contain.
+        if stats is not None:
+            stats.record_relations(result.relations, entities)
         return [(r.subject, r.predicate, r.object) for r in result.relations]
 
     except Exception as _:
         # print("get_relations: fallback extraction")
+        if stats is not None:
+            stats.increment("fallback_invoked")
         Relation, ExtractRelations = fallback_extraction_sig(
             entities, is_conversation, context, language
         )
@@ -416,4 +455,8 @@ def get_relations(
         for rel in fix_res.fixed_relations:
             if rel.subject in entities and rel.object in entities:
                 good_relations.append(rel)
+        if stats is not None:
+            stats.increment(
+                "fallback_dropped", len(fix_res.fixed_relations) - len(good_relations)
+            )
         return [(r.subject, r.predicate, r.object) for r in good_relations]
