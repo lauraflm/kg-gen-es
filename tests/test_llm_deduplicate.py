@@ -339,3 +339,63 @@ def test_spanish_alias_propagates_unchanged(monkeypatch):
     assert "Ciudad de México" in result.entities
     assert "está en" in result.edges
     assert_referentially_intact(result)
+
+
+# --------------------------------------------------------------------------
+# Quoted LLM output
+#
+# Seen with gpt-4o on MINE-ES: the alias came back as a quoted literal
+# ('"oruga"'), and the quotes became part of the entity name in the graph.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ('"oruga"', "oruga"),
+        ("'pupa'", "pupa"),
+        ("“se convierte en”", "se convierte en"),
+        ("«mariposa»", "mariposa"),
+        ('  "oruga"  ', "oruga"),
+        ("oruga", "oruga"),
+        ('"oruga', '"oruga'),  # unmatched: left alone
+        ('el "gran" río', 'el "gran" río'),  # inner quotes are part of the name
+        ("'", "'"),
+    ],
+)
+def test_clean_llm_label(raw, expected):
+    assert llm_dedup_module._clean_llm_label(raw) == expected
+
+
+def test_quoted_alias_and_duplicates_are_unquoted(monkeypatch):
+    graph = Graph(
+        entities={"oruga", "larva", "huevo"},
+        edges={"se convierte en"},
+        relations={("huevo", "se convierte en", "larva")},
+    )
+    script = {
+        "oruga": ('"oruga"', ['"larva"']),
+        "larva": ('"oruga"', ['"oruga"']),
+        "se convierte en": ('"se convierte en"', []),
+    }
+    deduper, _ = build(graph, script, language="es", monkeypatch=monkeypatch)
+    deduper.cluster()
+
+    result = deduper.deduplicate()
+
+    assert "oruga" in result.entities
+    assert "larva" not in result.entities  # the quoted duplicate still merged
+    assert not any(e.startswith('"') for e in result.entities)
+    assert "se convierte en" in result.edges
+    assert ("huevo", "se convierte en", "oruga") in result.relations
+    assert_referentially_intact(result)
+
+
+def test_empty_alias_falls_back_to_item(monkeypatch):
+    graph = Graph(entities={"oruga"}, edges={"es"}, relations=set())
+    deduper, _ = build(graph, {"oruga": ('""', [])}, language="es", monkeypatch=monkeypatch)
+
+    items, clusters = deduper.deduplicate_cluster(["oruga"], "node")
+
+    assert items == {"oruga"}
+    assert clusters == {"oruga": {"oruga"}}

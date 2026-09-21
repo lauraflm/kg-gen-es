@@ -27,6 +27,25 @@ _ITEM_NOUNS = {
     },
 }
 
+# Opening -> closing quote pairs an LLM may wrap an output string in.
+_QUOTE_PAIRS = {'"': '"', "'": "'", "\u201c": "\u201d", "\u2018": "\u2019", "\u00ab": "\u00bb"}
+
+
+def _clean_llm_label(text: str) -> str:
+    """Strip whitespace and one pair of wrapping quotes from an LLM label.
+
+    Models sometimes return the alias as a quoted literal (`"oruga"` for
+    `oruga`). Stored as is, the quotes become part of the entity or edge name
+    that enters the graph, and a quoted duplicate matches no item in the
+    cluster and is silently dropped. Only a matching pair around the whole
+    string is removed, so quotes inside a name are kept.
+    """
+    text = text.strip()
+    if len(text) >= 2 and _QUOTE_PAIRS.get(text[0]) == text[-1]:
+        text = text[1:-1].strip()
+    return text
+
+
 _DEDUPLICATE_INSTRUCTIONS = {
     "en": "Find duplicate {plural} for the item and an alias that best represents the duplicates. Duplicates are those that are the same in meaning, such as with variation in tense, plural form, stem form, case, abbreviation, shorthand. Return an empty list if there are none.",
     "es": "Encuentra {plural} duplicadas para el elemento y un alias que represente mejor a los duplicados. Los duplicados son aquellos que tienen el mismo significado, con variaciones de tiempo verbal, número, forma raíz, mayúsculas, abreviatura o forma corta. Devuelve una lista vacía si no hay ninguno.",
@@ -287,10 +306,16 @@ class LLMDeduplicate:
             # with dspy.context(lm=self.lm):
             deduplicate = dspy.Predict(Deduplicate)
             result = deduplicate(item=item, set=relevant_items)
-            items.add(result.alias)
+            # An alias that cleans to nothing would add an empty entity.
+            alias = _clean_llm_label(result.alias) or item
+            items.add(alias)
 
             # Filter duplicates to only include those that exist in the cluster
-            duplicates = [dup for dup in result.duplicates if dup in cluster]
+            duplicates = [
+                dup
+                for dup in (_clean_llm_label(d) for d in result.duplicates)
+                if dup in cluster
+            ]
 
             # Always key the cluster by the alias, and merge rather than
             # assign. Both details are needed to keep every item in
@@ -308,7 +333,7 @@ class LLMDeduplicate:
             # Either way the orphaned members match no entry in the remap
             # below, leaving relations that point at entities absent from the
             # graph. `entities` itself is unaffected by this bookkeeping.
-            members = item_clusters.setdefault(result.alias, set())
+            members = item_clusters.setdefault(alias, set())
             members.add(item)
 
             if len(duplicates) > 0:
@@ -317,7 +342,7 @@ class LLMDeduplicate:
                 )
                 self.logger.info(
                     "  → Using alias '%s' to represent: '%s' and %s",
-                    result.alias,
+                    alias,
                     item,
                     duplicates,
                 )
