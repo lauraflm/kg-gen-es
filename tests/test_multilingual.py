@@ -169,3 +169,42 @@ def test_validate_language_accepts_supported(language):
 def test_validate_language_rejects_unsupported(language):
     with pytest.raises(ValueError, match="Unsupported language"):
         validate_language(language)
+
+
+# --------------------------------------------------------------------------
+# SemHash model loading under concurrency
+# --------------------------------------------------------------------------
+
+
+def test_default_semhash_model_loads_once_across_threads(monkeypatch):
+    # Regression: leaving the default to SemHash reloaded it on every call,
+    # and concurrent loads crashed inside tqdm with model2vec >= 0.8.
+    import threading
+    import time
+
+    from src.kg_gen.utils import deduplicate as dedup_module
+
+    loads = []
+
+    class FakeStaticModel:
+        @staticmethod
+        def from_pretrained(name):
+            loads.append(name)
+            time.sleep(0.01)  # widen the race window
+            return object()
+
+    monkeypatch.setattr(dedup_module, "StaticModel", FakeStaticModel)
+    monkeypatch.setattr(dedup_module, "_M2V_CACHE", {})
+
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(dedup_module._load_semhash_model()))
+        for _ in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert loads == ["minishlab/potion-base-8M"]
+    assert len({id(model) for model in results}) == 1

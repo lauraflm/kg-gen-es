@@ -1,3 +1,4 @@
+import threading
 import unicodedata
 from typing import Optional
 
@@ -172,20 +173,32 @@ class DeduplicateList:
 
 # ---- Module-level cache for Model2Vec models ----
 _M2V_CACHE: dict[str, object] = {}
+_M2V_LOCK = threading.Lock()
+
+# What SemHash.from_records loads when it is given no model.
+_SEMHASH_DEFAULT_MODEL = "minishlab/potion-base-8M"
 
 
 def _load_semhash_model(model_name: Optional[str] = None):
-    """Load and cache a Model2Vec model for SemHash. Returns None if no name given."""
-    if model_name is None:
-        return None
-    if model_name not in _M2V_CACHE:
-        if StaticModel is None:
-            raise ImportError(
-                "model2vec is required for custom SemHash models. "
-                "Install with: pip install model2vec"
-            )
-        _M2V_CACHE[model_name] = StaticModel.from_pretrained(model_name)
-    return _M2V_CACHE[model_name]
+    """Load and cache a Model2Vec model for SemHash.
+
+    `None` resolves to SemHash's own default rather than being passed through.
+    Left to SemHash, the default model is reloaded on every `from_records`
+    call, and with model2vec >= 0.8 each load opens tqdm progress bars that
+    race when graphs are deduplicated from several threads at once
+    (`AttributeError: type object 'tqdm' has no attribute '_lock'`). Loading it
+    once here gives the same model, so the same result, without the race.
+    """
+    model_name = model_name or _SEMHASH_DEFAULT_MODEL
+    with _M2V_LOCK:
+        if model_name not in _M2V_CACHE:
+            if StaticModel is None:
+                raise ImportError(
+                    "model2vec is required for custom SemHash models. "
+                    "Install with: pip install model2vec"
+                )
+            _M2V_CACHE[model_name] = StaticModel.from_pretrained(model_name)
+        return _M2V_CACHE[model_name]
 
 
 def run_semhash_deduplication(
@@ -202,7 +215,7 @@ def run_semhash_deduplication(
         similarity_threshold: SemHash cosine similarity threshold.
         language: Language code for text normalization ("en", "es", etc.).
         semhash_model_name: HuggingFace model name for SemHash encoder.
-            If None, uses SemHash default (potion-base-8M).
+            If None, uses SemHash's default (potion-base-8M), loaded once.
             For multilingual: "minishlab/potion-multilingual-128M".
     """
     semhash_model = _load_semhash_model(semhash_model_name)
