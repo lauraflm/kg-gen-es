@@ -190,6 +190,7 @@ class KGGen:
         language: Optional[str] = None,
         semhash_model_name: Optional[str] = None,
         stats: Optional[ExtractionStats] = None,
+        guiding_questions: Optional[List[str]] = None,
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -204,6 +205,10 @@ class KGGen:
             semhash_model_name: Override instance semhash model for this call
             stats: Optional counter collector for extraction diagnostics;
                 collecting never changes the extracted graph
+            guiding_questions: Optional competency questions. They are passed
+                to entity and relation extraction (DSPy route only) to steer
+                what is extracted; without them the prompts are unchanged.
+                Unlike `context`, which only reaches deduplication.
 
         Returns:
             Graph: Generated knowledge graph
@@ -258,6 +263,7 @@ class KGGen:
                     if temperature is not None
                     else self.temperature,
                     language=_language,
+                    guiding_questions=guiding_questions,
                 )
                 relations = get_relations(
                     content,
@@ -272,6 +278,7 @@ class KGGen:
                     else self.temperature,
                     language=_language,
                     stats=stats,
+                    guiding_questions=guiding_questions,
                 )
                 # Recorded only once both steps succeeded, so a chunk retried
                 # after a context-length error is not counted twice.

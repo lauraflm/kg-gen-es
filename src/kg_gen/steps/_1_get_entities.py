@@ -27,6 +27,23 @@ _ENTITIES_OUTPUT_DESC = {
     "es": "Lista EXHAUSTIVA de entidades clave",
 }
 
+# Guided extraction: competency questions steer what to look for, never what
+# to add. Only used when questions are given, so unguided prompts stay
+# byte-identical to the unguided extractor.
+_GUIDED_ENTITIES_INSTRUCTIONS = {
+    "en": """You are also given competency questions: questions the knowledge graph should be able to answer.
+    Pay special attention to the entities the source text provides to answer them.
+    Extract only what the text states: do not answer the questions and do not add information that is not in the text.""",
+    "es": """También recibes preguntas de competencia: preguntas que el grafo de conocimiento debería poder responder.
+    Presta especial atención a las entidades que el texto fuente aporta para responderlas.
+    Extrae solo lo que el texto dice: no respondas las preguntas ni agregues información que no esté en el texto.""",
+}
+
+GUIDING_QUESTIONS_DESC = {
+    "en": "Competency questions that guide what to extract",
+    "es": "Preguntas de competencia que orientan qué extraer",
+}
+
 _ENTITIES_PROMPT_FILES = {"es": "entidades.txt", "en": "entities.txt"}
 
 # User-turn wrapper for the litellm path. The XML-ish tags are structural and
@@ -51,12 +68,15 @@ Este es el texto del que debes extraer entidades:
 }
 
 
-def _entities_sig(is_conversation: bool, language: str = "en") -> dspy.Signature:
+def _entities_sig(
+    is_conversation: bool, language: str = "en", guided: bool = False
+) -> dspy.Signature:
     """Build the entity-extraction signature for the requested language.
 
     Replaces upstream's two fixed signature classes (TextEntities /
     ConversationEntities); the fields are identical, only the instructions
-    and field descriptions vary by language.
+    and field descriptions vary by language. With `guided`, the signature adds
+    the competency questions as an input and says how to use them.
     """
     instructions = _pick(
         _CONVERSATION_ENTITIES_INSTRUCTIONS
@@ -65,15 +85,30 @@ def _entities_sig(is_conversation: bool, language: str = "en") -> dspy.Signature
         language,
     )
 
-    class EntitiesSignature(dspy.Signature):
-        __doc__ = instructions
+    if not guided:
+
+        class EntitiesSignature(dspy.Signature):
+            __doc__ = instructions
+
+            source_text: str = dspy.InputField()
+            entities: list[str] = dspy.OutputField(
+                desc=_pick(_ENTITIES_OUTPUT_DESC, language)
+            )
+
+        return EntitiesSignature
+
+    class GuidedEntitiesSignature(dspy.Signature):
+        __doc__ = f"{instructions}\n    {_pick(_GUIDED_ENTITIES_INSTRUCTIONS, language)}"
 
         source_text: str = dspy.InputField()
+        guiding_questions: list[str] = dspy.InputField(
+            desc=_pick(GUIDING_QUESTIONS_DESC, language)
+        )
         entities: list[str] = dspy.OutputField(
             desc=_pick(_ENTITIES_OUTPUT_DESC, language)
         )
 
-    return EntitiesSignature
+    return GuidedEntitiesSignature
 
 
 class EntitiesResponse(BaseModel):
@@ -143,7 +178,10 @@ def get_entities(
     api_base: Optional[str] = None,
     temperature: float = 0.0,
     language: str = "en",
+    guiding_questions: Optional[List[str]] = None,
 ) -> List[str]:
+    if guiding_questions and use_litellm_prompt:
+        raise NotImplementedError("Guided extraction is only implemented on the DSPy route.")
     if use_litellm_prompt and not is_conversation:
         return _get_entities_litellm(
             input_data,
@@ -154,7 +192,11 @@ def get_entities(
             language=language,
         )
 
-    EntitiesSignature = _entities_sig(is_conversation, language)
+    guided = bool(guiding_questions)
+    EntitiesSignature = _entities_sig(is_conversation, language, guided=guided)
     extract = dspy.Predict(EntitiesSignature)
-    result = extract(source_text=input_data)
+    if guided:
+        result = extract(source_text=input_data, guiding_questions=list(guiding_questions))
+    else:
+        result = extract(source_text=input_data)
     return result.entities

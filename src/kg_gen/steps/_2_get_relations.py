@@ -6,6 +6,7 @@ import litellm
 from pydantic import BaseModel, create_model, ValidationError
 
 from kg_gen.utils.extraction_stats import ExtractionStats
+from kg_gen.steps._1_get_entities import GUIDING_QUESTIONS_DESC
 from kg_gen.utils.i18n import pick as _pick
 
 
@@ -323,12 +324,39 @@ def _get_relations_litellm(
     return parse_relations_response(raw_json, entities, RelationsResponse, stats=stats)
 
 
+_GUIDED_RELATIONS_INSTRUCTIONS = {
+    "en": """You are also given competency questions: questions the knowledge graph should be able to answer.
+    Pay special attention to the relations the source text provides to answer them.
+    Extract only what the text states: do not answer the questions and do not add relations that are not in the text.""",
+    "es": """También recibes preguntas de competencia: preguntas que el grafo de conocimiento debería poder responder.
+    Presta especial atención a las relaciones que el texto fuente aporta para responderlas.
+    Extrae solo lo que el texto dice: no respondas las preguntas ni agregues relaciones que no estén en el texto.""",
+}
+
+
+def _guided_sig(Base: type, language: str) -> dspy.Signature:
+    """Add the competency questions to a relation signature. Only used when
+    questions are given, so unguided prompts stay unchanged."""
+
+    class GuidedRelations(Base):
+        __doc__ = f"{Base.__doc__}\n    {_pick(_GUIDED_RELATIONS_INSTRUCTIONS, language)}"
+
+        guiding_questions: list[str] = dspy.InputField(
+            desc=_pick(GUIDING_QUESTIONS_DESC, language)
+        )
+
+    return GuidedRelations
+
+
 def extraction_sig(
     Relation: BaseModel,
     is_conversation: bool,
     context: str = "",
     language: str = "en",
+    guided: bool = False,
 ) -> dspy.Signature:
+    if guided:
+        return _guided_sig(extraction_sig(Relation, is_conversation, context, language), language)
     if not is_conversation:
         instructions = _pick(_TEXT_RELATIONS_INSTRUCTIONS, language)
 
@@ -358,7 +386,7 @@ def extraction_sig(
 
 
 def fallback_extraction_sig(
-    entities, is_conversation, context: str = "", language: str = "en"
+    entities, is_conversation, context: str = "", language: str = "en", guided: bool = False
 ) -> dspy.Signature:
     """This fallback extraction does not strictly type the subject and object strings."""
 
@@ -370,7 +398,7 @@ def fallback_extraction_sig(
         doc=_pick(_FALLBACK_RELATION_DOC, language).format(entities_str=entities_str),
     )
 
-    return Relation, extraction_sig(Relation, is_conversation, context, language)
+    return Relation, extraction_sig(Relation, is_conversation, context, language, guided)
 
 
 def _filter_entities(entities: List[str]) -> List[str]:
@@ -390,9 +418,15 @@ def get_relations(
     temperature: float = 0.0,
     language: str = "en",
     stats: Optional[ExtractionStats] = None,
+    guiding_questions: Optional[List[str]] = None,
 ) -> List[Tuple[str, str, str]]:
     # Filter out entities containing backslashes
     entities = _filter_entities(entities)
+    guided = bool(guiding_questions)
+    guide = {"guiding_questions": list(guiding_questions)} if guided else {}
+
+    if guided and use_litellm_prompt:
+        raise NotImplementedError("Guided extraction is only implemented on the DSPy route.")
 
     if use_litellm_prompt and not is_conversation:
         if stats is not None:
@@ -413,11 +447,11 @@ def get_relations(
 
     Relation = _relation_model(language)
 
-    ExtractRelations = extraction_sig(Relation, is_conversation, context, language)
+    ExtractRelations = extraction_sig(Relation, is_conversation, context, language, guided)
 
     try:
         extract = dspy.Predict(ExtractRelations)
-        result = extract(source_text=input_data, entities=entities)
+        result = extract(source_text=input_data, entities=entities, **guide)
         # Note that this route returns the triples UNFILTERED: `Relation`
         # declares subject and object as plain `str`, so nothing enforces
         # that they are extracted entities. Any endpoint counted as missing
@@ -432,10 +466,10 @@ def get_relations(
         if stats is not None:
             stats.increment("fallback_invoked")
         Relation, ExtractRelations = fallback_extraction_sig(
-            entities, is_conversation, context, language
+            entities, is_conversation, context, language, guided
         )
         extract = dspy.Predict(ExtractRelations)
-        result = extract(source_text=input_data, entities=entities)
+        result = extract(source_text=input_data, entities=entities, **guide)
 
         class FixedRelations(dspy.Signature):
             __doc__ = _pick(_FIXED_RELATIONS_INSTRUCTIONS, language)
