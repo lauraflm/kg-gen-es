@@ -311,9 +311,13 @@ class LLMDeduplicate:
             items.add(alias)
 
             # Filter duplicates to only include those that exist in the cluster
+            # `dict.fromkeys` drops repeats while keeping order: two entries
+            # that clean to the same name ('"larva"', 'larva') would otherwise
+            # both pass the membership test and the second `cluster.remove`
+            # below would raise, losing the whole cluster.
             duplicates = [
                 dup
-                for dup in (_clean_llm_label(d) for d in result.duplicates)
+                for dup in dict.fromkeys(_clean_llm_label(d) for d in result.duplicates)
                 if dup in cluster
             ]
 

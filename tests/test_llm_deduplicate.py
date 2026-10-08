@@ -399,3 +399,22 @@ def test_empty_alias_falls_back_to_item(monkeypatch):
 
     assert items == {"oruga"}
     assert clusters == {"oruga": {"oruga"}}
+
+
+def test_duplicates_repeated_after_cleaning_do_not_lose_the_cluster(monkeypatch):
+    """`"larva"` and `larva` clean to the same name.
+
+    Both passed the membership filter before either was removed from the
+    cluster, so the second `cluster.remove` raised ValueError. `deduplicate()`
+    only logs a failed cluster, so every item in it vanished from the graph
+    while relations kept pointing at them.
+    """
+    graph = Graph(entities={"oruga", "larva"}, edges={"es"}, relations=set())
+    script = {"oruga": ("oruga", ['"larva"', "larva"])}
+    deduper, _ = build(graph, script, language="es", monkeypatch=monkeypatch)
+
+    # `pop()` takes the last element, so "oruga" is processed first.
+    items, clusters = deduper.deduplicate_cluster(["larva", "oruga"], "node")
+
+    assert items == {"oruga"}
+    assert clusters == {"oruga": {"oruga", "larva"}}
