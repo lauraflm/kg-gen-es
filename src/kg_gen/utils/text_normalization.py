@@ -21,11 +21,14 @@ same treatment, but it means the output is not well-formed Spanish and
 should not be shown to users.
 """
 
+import threading
 import unicodedata
+from pathlib import Path
 
 import spacy
 
 _NLP_CACHE: dict[str, spacy.language.Language] = {}
+_NLP_LOCK = threading.Lock()
 
 # Map language codes to spaCy model names.
 # Add more as needed; small models suffice for lemmatization.
@@ -40,26 +43,68 @@ _SPACY_MODELS: dict[str, str] = {
 }
 
 
+def _spacy_model_name(language: str) -> str:
+    """Return the spaCy model configured for the given language code."""
+    model_name = _SPACY_MODELS.get(language)
+    if model_name is None:
+        raise ValueError(
+            f"No spaCy model configured for language '{language}'. "
+            f"Supported: {list(_SPACY_MODELS.keys())}. "
+            f"Add the model name to _SPACY_MODELS in text_normalization.py."
+        )
+    return model_name
+
+
+def _model_not_installed(model_name: str) -> OSError:
+    return OSError(
+        f"spaCy model '{model_name}' not found. "
+        f"Install it with: python -m spacy download {model_name}"
+    )
+
+
+def require_spacy_model(language: str) -> None:
+    """Raise unless the spaCy model `TextNormalizer` needs is installed.
+
+    `TextNormalizer` loads the model only at deduplication, after every
+    extraction call has been made, so a missing model found there fails once
+    the LLM work is already paid for. This runs the same lookup up front, for
+    `validate_language` to call when a language is accepted.
+
+    It only looks the model up, the way `spacy.load` resolves a name: an
+    installed package, else a path to a model directory. Checking the
+    package alone would reject a configured path that loads fine. No model
+    is loaded, so the check is cheap enough to repeat on every call.
+
+    Raises:
+        ValueError: if no model is configured for `language`.
+        OSError: if the configured model is not installed.
+    """
+    # English is singularized with inflect and never loads a spaCy model
+    # (see TextNormalizer), so en_core_web_sm must not become a requirement.
+    if language == "en":
+        return
+    model_name = _spacy_model_name(language)
+    if not (spacy.util.is_package(model_name) or Path(model_name).exists()):
+        raise _model_not_installed(model_name)
+
+
 def _get_nlp(language: str) -> spacy.language.Language:
-    """Load and cache a spaCy model for the given language code."""
-    if language not in _NLP_CACHE:
-        model_name = _SPACY_MODELS.get(language)
-        if model_name is None:
-            raise ValueError(
-                f"No spaCy model configured for language '{language}'. "
-                f"Supported: {list(_SPACY_MODELS.keys())}. "
-                f"Add the model name to _SPACY_MODELS in text_normalization.py."
-            )
-        try:
-            _NLP_CACHE[language] = spacy.load(
-                model_name, disable=["ner", "parser", "textcat"]
-            )
-        except OSError:
-            raise OSError(
-                f"spaCy model '{model_name}' not found. "
-                f"Install it with: python -m spacy download {model_name}"
-            )
-    return _NLP_CACHE[language]
+    """Load and cache a spaCy model for the given language code.
+
+    The lock covers the load itself. Without it, deduplications running in
+    parallel threads all miss the empty cache and each call `spacy.load` for
+    the same model, repeating a slow load once per thread.
+    """
+    with _NLP_LOCK:
+        if language not in _NLP_CACHE:
+            model_name = _spacy_model_name(language)
+            try:
+                _NLP_CACHE[language] = spacy.load(
+                    model_name, disable=["ner", "parser", "textcat"]
+                )
+            except OSError:
+                raise _model_not_installed(model_name)
+        return _NLP_CACHE[language]
 
 
 class TextNormalizer:
@@ -92,16 +137,28 @@ class TextNormalizer:
 
     def fold(self, text: str) -> str:
         """
-        Case- and accent-insensitive comparison key (language-agnostic).
+        Case-insensitive comparison key (language-agnostic).
 
-        Used only to group matching-key variants (e.g. "México" / "MÉXICO")
-        before dedup, so pure casing/diacritic differences collapse
-        deterministically instead of relying on the SemHash similarity
-        threshold to catch them. Never used for display text.
+        Used only to group case variants (e.g. "México" / "MÉXICO") before
+        dedup, so they collapse deterministically instead of relying on the
+        SemHash similarity threshold to catch them. Never used for display
+        text.
+
+        Diacritics are kept. In Spanish they distinguish words ("año" /
+        "ano", "papá" / "papa", "él" / "el"), and the same mark in the same
+        position also separates two spellings of one entity ("Perú" /
+        "Peru"), so no character-level rule can block the first kind of
+        merge and keep the second. A grouping made here is final whatever
+        the threshold, so accent omission is left to the similarity-based
+        stages.
         """
-        nfkd = unicodedata.normalize("NFKD", text)
-        stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
-        return stripped.casefold()
+        # Decompose first so composed and decomposed spellings of a letter
+        # ("á" vs "a" + U+0301) compare equal now that marks are part of the
+        # key, and again after casefold, which can itself emit a sequence
+        # that is no longer normalized. NFKD rather than NFD keeps the
+        # compatibility folding ("ﬁ" -> "fi") the key always had.
+        decomposed = unicodedata.normalize("NFKD", text)
+        return unicodedata.normalize("NFKD", decomposed.casefold())
 
     def lemmatize_nouns(self, text: str) -> str:
         """

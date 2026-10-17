@@ -1,15 +1,31 @@
 """Offline tests for the multilingual support added on top of kg-gen.
 
-None of these call an LLM or load spaCy, so they run everywhere and take
-milliseconds.
+None of these call an LLM or load a spaCy model, so they take milliseconds.
+Accepting "es" does check that `es_core_news_md` is installed, without
+loading it, so that model has to be present like for the rest of the
+Spanish pipeline (see "Requirements and fallback behavior" in the README).
 """
+
+import socket
 
 import pytest
 
-from src.kg_gen.steps._1_get_entities import _entities_sig
-from src.kg_gen.steps._2_get_relations import _relation_model, extraction_sig
+from src.kg_gen import kg_gen as kg_gen_module
+from src.kg_gen.steps._1_get_entities import _entities_sig, _load_entities_prompt
+from src.kg_gen.steps._2_get_relations import (
+    _load_relations_prompt,
+    _relation_model,
+    extraction_sig,
+    fallback_extraction_sig,
+)
 from src.kg_gen.utils.deduplicate import _representative_sort_key
 from src.kg_gen.utils.i18n import pick, validate_language
+
+# The package's own modules import each other as `kg_gen.*`, which Python
+# keeps as a module object separate from the `src.kg_gen.*` copy imported
+# above. KGGen and validate_language read `_SPACY_MODELS` from this copy, so
+# it is the one the tests patch.
+from kg_gen.utils import text_normalization as package_text_normalization
 
 # --------------------------------------------------------------------------
 # English prompt parity
@@ -118,6 +134,61 @@ def test_unknown_language_falls_back_to_english():
     assert pick({"en": "fallback", "es": "respaldo"}, "fr") == "fallback"
 
 
+def test_prompt_files_fall_back_to_english():
+    """The litellm-path prompt files follow the same fallback as `pick`."""
+    assert _load_entities_prompt("fr") == _load_entities_prompt("en")
+    assert _load_relations_prompt("fr") == _load_relations_prompt("en")
+    assert _load_entities_prompt("es") != _load_entities_prompt("en")
+    assert _load_relations_prompt("es") != _load_relations_prompt("en")
+
+
+# --------------------------------------------------------------------------
+# Signature caching
+# --------------------------------------------------------------------------
+
+
+def test_signature_builders_reuse_one_class_per_arguments():
+    """Built once per argument set, not once per chunk."""
+    assert _entities_sig(False, "es") is _entities_sig(False, "es")
+    assert _entities_sig(False, "es") is not _entities_sig(False, "en")
+    assert _entities_sig(False, "es") is not _entities_sig(True, "es")
+
+    relation_es = _relation_model("es")
+    relation_en = _relation_model("en")
+    assert relation_es is _relation_model("es")
+    assert relation_es is not relation_en
+
+    assert extraction_sig(relation_es, False, "", "es") is extraction_sig(
+        relation_es, False, "", "es"
+    )
+    assert extraction_sig(relation_es, False, "", "es") is not extraction_sig(
+        relation_en, False, "", "en"
+    )
+    assert extraction_sig(relation_es, False, "", "es") is not extraction_sig(
+        relation_es, True, "", "es"
+    )
+
+
+def test_fallback_signature_is_built_per_entity_list_and_not_cached():
+    """The fallback inlines each chunk's entity list into the Relation doc,
+    so it has to be built fresh, and must not pile up in the caches."""
+    relation_size = _relation_model.cache_info().currsize
+    sig_size = extraction_sig.cache_info().currsize
+
+    relation_a, sig_a = fallback_extraction_sig(["Ana", "Madrid"], False, "", "es")
+    relation_b, sig_b = fallback_extraction_sig(["Luis", "Lima"], False, "", "es")
+
+    assert "Madrid" in relation_a.__doc__ and "Lima" not in relation_a.__doc__
+    assert "Lima" in relation_b.__doc__ and "Madrid" not in relation_b.__doc__
+    assert sig_a is not sig_b
+    assert _relation_model.cache_info().currsize == relation_size
+    assert extraction_sig.cache_info().currsize == sig_size
+    # The cached default model keeps its own doc.
+    assert _relation_model("es").__doc__ == (
+        "Tripleta sujeto-predicado-objeto de un grafo de conocimiento."
+    )
+
+
 # --------------------------------------------------------------------------
 # Representative selection
 # --------------------------------------------------------------------------
@@ -171,6 +242,83 @@ def test_validate_language_rejects_unsupported(language):
         validate_language(language)
 
 
+MISSING_SPACY_MODEL = "kg_gen_test_model_not_installed"
+
+
+@pytest.fixture
+def no_network(monkeypatch):
+    """Fail the test on any attempt to open a connection."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("offline test tried to open a network connection")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+
+
+@pytest.fixture
+def spacy_models_missing(monkeypatch):
+    """Configure every language with a spaCy model that is not installed."""
+    for language in list(package_text_normalization._SPACY_MODELS):
+        monkeypatch.setitem(
+            package_text_normalization._SPACY_MODELS, language, MISSING_SPACY_MODEL
+        )
+
+
+def _offline_kggen(**kwargs):
+    # A fake model name and key: constructing dspy.LM only stores them.
+    return kg_gen_module.KGGen(model="openai/fake-model", api_key="test-key", **kwargs)
+
+
+def test_validate_language_rejects_missing_spacy_model(spacy_models_missing):
+    # Regression: only the code was checked, so a missing model surfaced as
+    # an OSError at deduplication, after every extraction call was paid for.
+    with pytest.raises(
+        OSError, match=f"python -m spacy download {MISSING_SPACY_MODEL}"
+    ):
+        validate_language("es")
+
+
+def test_kggen_rejects_missing_spacy_model_at_construction(
+    no_network, spacy_models_missing
+):
+    with pytest.raises(OSError, match="python -m spacy download"):
+        _offline_kggen(language="es")
+
+
+def test_generate_rejects_missing_spacy_model_before_extraction(
+    no_network, spacy_models_missing, monkeypatch
+):
+    def extraction_must_not_run(*args, **kwargs):
+        raise AssertionError("extraction ran before the language was validated")
+
+    monkeypatch.setattr(kg_gen_module, "get_entities", extraction_must_not_run)
+    monkeypatch.setattr(kg_gen_module, "get_relations", extraction_must_not_run)
+
+    kg = _offline_kggen()
+    with pytest.raises(OSError, match="python -m spacy download"):
+        kg.generate("Ana vive en Madrid.", language="es")
+
+
+def test_english_needs_no_spacy_model(no_network, spacy_models_missing):
+    # English is singularized with inflect, so en_core_web_sm must not
+    # become a requirement even though `_SPACY_MODELS` lists it.
+    assert validate_language("en") == "en"
+    assert _offline_kggen(language="en").language == "en"
+
+
+def test_kggen_construction_is_offline(no_network, monkeypatch):
+    # The model check reads installed-package metadata; it must not load
+    # the model or reach the network.
+    def load_must_not_run(*args, **kwargs):
+        raise AssertionError("the spaCy model was loaded, not just looked up")
+
+    monkeypatch.setattr(package_text_normalization.spacy, "load", load_must_not_run)
+
+    assert _offline_kggen(language="es").language == "es"
+    assert _offline_kggen(language="en").language == "en"
+
+
 # --------------------------------------------------------------------------
 # SemHash model loading under concurrency
 # --------------------------------------------------------------------------
@@ -208,3 +356,40 @@ def test_default_semhash_model_loads_once_across_threads(monkeypatch):
 
     assert loads == ["minishlab/potion-base-8M"]
     assert len({id(model) for model in results}) == 1
+
+
+# --------------------------------------------------------------------------
+# spaCy model loading under concurrency
+# --------------------------------------------------------------------------
+
+
+def test_spacy_model_loads_once_across_threads(monkeypatch):
+    # Regression: the cache was filled without a lock, so graphs
+    # deduplicated from several threads each loaded the same model.
+    import threading
+    import time
+
+    from src.kg_gen.utils import text_normalization
+
+    loads = []
+
+    def fake_load(name, **kwargs):
+        loads.append(name)
+        time.sleep(0.01)  # widen the race window
+        return object()
+
+    monkeypatch.setattr(text_normalization.spacy, "load", fake_load)
+    monkeypatch.setattr(text_normalization, "_NLP_CACHE", {})
+
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(text_normalization._get_nlp("es")))
+        for _ in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert loads == [text_normalization._SPACY_MODELS["es"]]
+    assert len({id(nlp) for nlp in results}) == 1

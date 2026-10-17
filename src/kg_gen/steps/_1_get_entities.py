@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import List, Optional
 from pathlib import Path
 import dspy
@@ -51,6 +52,10 @@ Este es el texto del que debes extraer entidades:
 }
 
 
+# Cached: the class depends only on these two arguments, and get_entities
+# would otherwise rebuild it for every chunk. Sharing it across threads is
+# safe, since dspy derives new signature classes rather than mutating them.
+@lru_cache(maxsize=None)
 def _entities_sig(is_conversation: bool, language: str = "en") -> dspy.Signature:
     """Build the entity-extraction signature for the requested language.
 
@@ -84,7 +89,7 @@ class EntitiesResponse(BaseModel):
 
 def _load_entities_prompt(language: str = "en") -> str:
     """Load the entities prompt template from file."""
-    filename = _ENTITIES_PROMPT_FILES.get(language, "entities.txt")
+    filename = _pick(_ENTITIES_PROMPT_FILES, language)
     prompt_path = Path(__file__).parent.parent / "prompts" / filename
     return prompt_path.read_text()
 

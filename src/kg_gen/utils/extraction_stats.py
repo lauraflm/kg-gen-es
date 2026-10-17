@@ -22,11 +22,18 @@ rather than papering over it:
   - The default dspy route does not constrain them at all: `Relation` declares
     subject and object as plain `str`. Triples whose endpoints are not in the
     entity list are KEPT, and flow into the Graph as relations pointing at
-    entities the graph does not contain.
+    entities the graph does not contain. The exception: when the primary
+    extraction raises, the dspy route's fallback does filter, and the
+    triples it drops are counted in `fallback_dropped`.
 
 So `endpoint_missing` is a loss on one route and a dangling-reference defect
 on the other. It is counted the same way on both, and `route` records which
 one produced the numbers.
+
+Only successful attempts are counted. `KGGen.generate` collects each attempt
+in its own instance and `merge`s it in once the attempt succeeds, so an
+unchunked attempt that fails on context length and is retried in chunks
+leaves nothing behind.
 
 Chunk measurements
 ------------------
@@ -89,6 +96,11 @@ class ExtractionStats:
     # The primary extraction raised and the fallback signature ran instead.
     fallback_invoked: int = 0
     # Triples the fallback discarded because their endpoints did not match.
+    # The fallback's triples are also counted in relations_returned and
+    # endpoint_missing_*, so this is exactly the fallback's share of
+    # endpoint_missing_either, and on the dspy route
+    # endpoint_missing_either - fallback_dropped counts the dangling triples
+    # the route returned (before the union across chunks and dedup).
     fallback_dropped: int = 0
 
     # Which extraction route produced these numbers: "dspy" or "litellm".
@@ -152,6 +164,30 @@ class ExtractionStats:
     def increment(self, name: str, count: int = 1) -> None:
         with self._lock:
             setattr(self, name, getattr(self, name) + count)
+
+    def merge(self, other: "ExtractionStats") -> None:
+        """Fold another collector's counts into this one.
+
+        Counters are summed, the per-chunk lists extended, and `route` taken
+        from `other` when it has one. `other` is read, not drained.
+
+        This is what lets a caller collect an attempt in isolation and keep
+        it only if the attempt succeeds. The whole attempt lands under one
+        lock acquisition, so a concurrent `snapshot()` sees all of it or none
+        of it, never a chunk without its relations.
+        """
+        # Copy `other` before taking our own lock, so the two locks are never
+        # held together and opposite-direction merges cannot deadlock.
+        data = other.snapshot()
+        with self._lock:
+            for name, value in data.items():
+                if name == "route":
+                    if value is not None:
+                        self.route = value
+                elif isinstance(value, list):
+                    getattr(self, name).extend(value)
+                else:
+                    setattr(self, name, getattr(self, name) + value)
 
     # ---- Reading ----
 

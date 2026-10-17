@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import List, Tuple, Optional, Literal, Type
 from pathlib import Path
 import json
@@ -213,6 +214,11 @@ _RELATION_EXAMPLES = {
 }
 
 
+# Cached so get_relations does not rebuild the model for every chunk; its
+# callers pass only `language` here. The fallback path's `doc` embeds that
+# chunk's entity list, so fallback_extraction_sig calls `__wrapped__` instead:
+# caching it would keep one class per chunk alive for nothing.
+@lru_cache(maxsize=None)
 def _relation_model(language: str, doc: Optional[str] = None) -> Type[BaseModel]:
     """Build the subject-predicate-object model with language-appropriate
     field descriptions and few-shot examples.
@@ -239,7 +245,7 @@ def _relation_model(language: str, doc: Optional[str] = None) -> Type[BaseModel]
 
 def _load_relations_prompt(language: str = "en") -> str:
     """Load the relations prompt template from file."""
-    filename = _RELATIONS_PROMPT_FILES.get(language, "relations.txt")
+    filename = _pick(_RELATIONS_PROMPT_FILES, language)
     prompt_path = Path(__file__).parent.parent / "prompts" / filename
     return prompt_path.read_text()
 
@@ -323,6 +329,12 @@ def _get_relations_litellm(
     return parse_relations_response(raw_json, entities, RelationsResponse, stats=stats)
 
 
+# Cached for the same reason as _relation_model; the key includes the
+# Relation class itself, which is hashable by identity and, from
+# get_relations, the cached one. Bounded rather than unbounded because
+# `context` is free text from the caller. The fallback bypasses this cache
+# too, since its Relation class is new for every chunk.
+@lru_cache(maxsize=128)
 def extraction_sig(
     Relation: BaseModel,
     is_conversation: bool,
@@ -365,12 +377,16 @@ def fallback_extraction_sig(
     entities_str = "\n- ".join(entities)
 
     # TODO: should use literal's here instead.
-    Relation = _relation_model(
+    # `__wrapped__` builds both classes without the caches: the doc embeds
+    # this chunk's entities, so a cached entry would never be hit again.
+    Relation = _relation_model.__wrapped__(
         language,
         doc=_pick(_FALLBACK_RELATION_DOC, language).format(entities_str=entities_str),
     )
 
-    return Relation, extraction_sig(Relation, is_conversation, context, language)
+    return Relation, extraction_sig.__wrapped__(
+        Relation, is_conversation, context, language
+    )
 
 
 def _filter_entities(entities: List[str]) -> List[str]:
@@ -456,6 +472,15 @@ def get_relations(
             if rel.subject in entities and rel.object in entities:
                 good_relations.append(rel)
         if stats is not None:
+            # Counted from the fix step's output before the endpoint filter:
+            # it is this route's final proposal, as `result.relations` is the
+            # primary route's, so the two routes count at the same point. The
+            # fallback signature's own output is not counted; it is an
+            # intermediate the fix step rewrites, and counting both would
+            # count each triple twice. With the filtered list taken from the
+            # same input, fallback_dropped is exactly this call's share of
+            # endpoint_missing_either.
+            stats.record_relations(fix_res.fixed_relations, entities)
             stats.increment(
                 "fallback_dropped", len(fix_res.fixed_relations) - len(good_relations)
             )

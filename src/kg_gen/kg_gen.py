@@ -203,7 +203,9 @@ class KGGen:
             language: Override instance language for this call
             semhash_model_name: Override instance semhash model for this call
             stats: Optional counter collector for extraction diagnostics;
-                collecting never changes the extracted graph
+                collecting never changes the extracted graph. Only attempts
+                that succeed are counted, so a context-length retry is not
+                counted twice
 
         Returns:
             Graph: Generated knowledge graph
@@ -246,6 +248,13 @@ class KGGen:
             )
 
         def _process(content, lm):
+            # Each attempt collects into its own ExtractionStats, folded into
+            # the caller's only once both steps have succeeded. get_relations
+            # records as it goes (route, fallback_invoked, ...) and can still
+            # raise afterwards, so passing `stats` straight through would keep
+            # the counts of an unchunked attempt that hit a context-length
+            # error and was then retried in chunks.
+            attempt_stats = ExtractionStats() if stats is not None else None
             with dspy.context(lm=lm):
                 entities = get_entities(
                     content,
@@ -271,13 +280,12 @@ class KGGen:
                     if temperature is not None
                     else self.temperature,
                     language=_language,
-                    stats=stats,
+                    stats=attempt_stats,
                 )
-                # Recorded only once both steps succeeded, so a chunk retried
-                # after a context-length error is not counted twice.
-                if stats is not None:
-                    stats.record_chunk(content)
-                    stats.record_entities(len(entities))
+                if attempt_stats is not None:
+                    attempt_stats.record_chunk(content)
+                    attempt_stats.record_entities(len(entities))
+                    stats.merge(attempt_stats)
                 return entities, relations
 
         if not chunk_size:

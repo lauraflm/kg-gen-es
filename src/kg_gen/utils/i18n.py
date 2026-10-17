@@ -13,6 +13,9 @@ never editing call sites.
 
 from typing import Any
 
+# text_normalization imports nothing from kg_gen, so this adds no cycle.
+from kg_gen.utils.text_normalization import require_spacy_model
+
 # Languages with a full set of translated prompts. `language` values outside
 # this set still work -- `pick()` falls back to English -- but callers that
 # need to warn or fail early (e.g. KGGen validating its constructor arg)
@@ -23,13 +26,19 @@ DEFAULT_LANGUAGE = "en"
 
 
 def validate_language(language: str) -> str:
-    """Raise ValueError unless `language` is fully supported.
+    """Raise unless `language` is fully supported and usable here.
+
+    Raises ValueError for a code outside SUPPORTED_LANGUAGES, and OSError,
+    with the install command, when the spaCy model its deduplication needs
+    is not installed. English needs none: it is singularized with inflect.
 
     Called when a language is first accepted (KGGen construction, or a
     per-call override) rather than where it is used, so an unusable code is
     rejected before any LLM calls are paid for. Without this the failure is
     both late and inconsistent: prompts quietly fall back to English via
-    `pick()`, while `TextNormalizer` raises partway through deduplication.
+    `pick()`, while `TextNormalizer` raises partway through deduplication,
+    for an unknown code or a missing model alike. The model is only looked
+    up here, not loaded; deduplication still loads it.
     """
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError(
@@ -38,6 +47,7 @@ def validate_language(language: str) -> str:
             "To add one, translate the prompt tables and register the code in "
             "SUPPORTED_LANGUAGES (see 'Adding a language' in the README)."
         )
+    require_spacy_model(language)
     return language
 
 

@@ -14,8 +14,9 @@ except ImportError:
 
 
 def _representative_sort_key(text: str) -> tuple:
-    """Preference order for the display form among variants that differ only
-    in case or accents.
+    """Preference order for the display form among variants of one item: case
+    variants grouped by `TextNormalizer.fold()`, and originals that normalize
+    to the same form.
 
     Sorting by (length, alphabetical) decides by codepoint order, which
     systematically favors the worst variant: uppercase sorts before lowercase
@@ -97,9 +98,12 @@ class DeduplicateList:
         self.total_items = len(items)
 
         # Normalize and singularize each string
-        # Collapse case/accent-only variants (e.g. "México" / "MÉXICO") to a
-        # single canonical singular form before SemHash, so they merge
+        # Collapse case-only variants (e.g. "México" / "MÉXICO") to a single
+        # canonical singular form before SemHash, so they merge
         # deterministically instead of depending on the similarity threshold.
+        # Diacritics stay in the key: a merge made here ignores the threshold,
+        # and "año" / "ano" or "papá" / "papa" are different words. Accent
+        # omission ("Mexico" / "México") is left to SemHash and the LLM stage.
         # `items` arrives from a Graph `set`, whose iteration order depends on
         # PYTHONHASHSEED and therefore CHANGES between processes. Picking the
         # representative by arrival order -- last one wins in `items_map`,
@@ -147,7 +151,7 @@ class DeduplicateList:
 
         self.deduplicated_items = len(deduplication_result.selected)
         # Count what actually merged, not just what SemHash discarded: the
-        # case/accent collapsing happens BEFORE SemHash is called, so those
+        # case-variant collapsing happens BEFORE SemHash is called, so those
         # items never show up in `filtered`. Using len(filtered) reported 0
         # duplicates in cases where a merge had in fact happened.
         self.duplicate_items = self.total_items - self.deduplicated_items

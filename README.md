@@ -252,9 +252,39 @@ Both are real, and neither is fixed here on purpose: changing candidate
 retrieval would alter which items the LLM ever gets to compare, in every
 language. That makes it an algorithmic change to kg-gen rather than a
 linguistic adaptation, and it would confound any measurement that attributes a
-difference in graph quality to the Spanish adaptation. Note that accent
-variants are already collapsed earlier by `TextNormalizer.fold()` on the
-SemHash path, which runs first under `DeduplicateMethod.FULL`.
+difference in graph quality to the Spanish adaptation. Note that
+`TextNormalizer.fold()`, on the SemHash path that runs first under
+`DeduplicateMethod.FULL`, collapses only case variants (`México` / `MÉXICO`).
+It keeps diacritics on purpose, since in Spanish they separate different
+words (`año` / `ano`, `papá` / `papa`), so an accent omission such as
+`Mexico` / `México` is left to SemHash and to this LLM stage. With the
+default `potion-base-8M` encoder, whose tokenizer lowercases and strips
+accents, SemHash still merges every pair that differs only in case or
+accents, distinct words included, and labels the merge with the first form in
+sorted order, usually the unaccented one; `potion-multilingual-128M` keeps
+them apart.
+
+The SemHash step itself, by contrast, was changed deliberately in the shared
+core, for every language. `language="en"` therefore no longer reproduces
+upstream kg-gen's SemHash dedup exactly:
+
+- Items whose normalized, singularized forms differ only in case are grouped
+  by `fold()` before SemHash (`US` / `us`, `Paris` / `PARIS`), so they merge
+  whatever the encoder or threshold. Upstream left them to SemHash and its
+  threshold.
+- The display form among those variants, and among originals with the same
+  normalized form, comes from an explicit rule (`_representative_sort_key`:
+  mixed case, then more diacritics, then shortest), not from whichever
+  variant happened to arrive last.
+- SemHash receives its records `sorted` and runs with `ann_backend="basic"`
+  (exact search), instead of in `set` order on the default approximate index,
+  so the form that survives a SemHash merge is the first in sorted order.
+
+Upstream's choices depended on the iteration order of a `set`, which changes
+with `PYTHONHASHSEED` between processes, so two runs on the same graph could
+export different entity names. Applied to every language alike, these changes
+make dedup reproducible without favoring any configuration in a
+cross-language comparison.
 
 Bugs are treated differently from algorithm changes: the alias bookkeeping
 fixes in `deduplicate_cluster` and `_merge_clusters` apply to every language,
@@ -266,7 +296,7 @@ Non-English `language` values require a spaCy model for lemmatization (Spanish u
 python -m spacy download es_core_news_md
 ```
 
-An unsupported `language` code raises `ValueError` when `KGGen` is constructed, or when passed as a per-call override — before any LLM calls are made.
+An unsupported `language` code raises `ValueError`, and a supported one whose spaCy model is not installed raises `OSError` with the install command above. Both are checked when `KGGen` is constructed, or when the code is passed as a per-call override — before any LLM calls are made, rather than at deduplication after all extraction calls have been paid for. The check only looks the model up; it is still loaded at deduplication. English uses `inflect` instead of spaCy, so it needs no spaCy model.
 
 #### Adding a language
 1. Add the spaCy model to `_SPACY_MODELS` in [`utils/text_normalization.py`](src/kg_gen/utils/text_normalization.py) and install it.
