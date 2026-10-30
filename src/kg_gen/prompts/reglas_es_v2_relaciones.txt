@@ -1,9 +1,10 @@
 Reglas para el español:
 1. Sujeto tácito y pronombres. Si el verbo no tiene sujeto expreso, recupéralo cuando la concordancia y el discurso lo identifiquen con claridad. Resuelve también los pronombres átonos y los clíticos unidos al verbo (lo, la, le, se lo, dirigiéndolo): usa la entidad de la lista a la que se refieren. Nunca uses un pronombre como sujeto u objeto.
-2. Predicado en infinitivo. Escríbelo en español, en infinitivo y con su preposición o pronombre: fundar, trabajar para, depender de, dedicarse a, ser parte de, ser hermano de. Usa espacios, no guiones bajos. Al pasar a infinitivo no borres la negación ni el tiempo de algo que no ha ocurrido: no fundó → no fundar; fundará y fundaría se mantienen.
-3. Voz pasiva. El predicado debe corresponder con la dirección de la tripleta. Para la pasiva usa ser + participio en masculino singular: El Instituto Sur fue fundado por Ana Ríos → (Instituto Sur | ser fundado por | Ana Ríos). Nunca cambies el predicado sin cambiar los extremos: (Instituto Sur | fundar | Ana Ríos) es un error.
-4. El se. No lo borres ni lo tomes como agente. Conserva los verbos pronominales (dedicarse a, quejarse de). Una pasiva refleja sin agente no dice quién hizo la acción: El Instituto Sur se fundó en Valparaíso no identifica a su fundador.
-5. Entidades multipalabra. La preposición dentro de un nombre (Universidad de Chile, calidad del agua) no crea una relación aparte entre sus partes.
+2. Predicado en infinitivo. Escríbelo en español, en infinitivo y con la preposición o el pronombre que el verbo exige: fundar, trabajar para, depender de, dedicarse a, ser parte de, ser hermano de. Usa espacios, no guiones bajos. Al pasar a infinitivo no borres nada que cambie el sentido: la negación (no fundó → no fundar), el futuro o el condicional (fundará y fundaría se mantienen) ni los verbos modales (puede afectar → poder afectar; deben respetar → deber respetar).
+3. La a personal. La a que marca a la persona o al grupo que recibe la acción no es parte del predicado: afecta a los niños → afectar; une a los pueblos → unir. Sí lo es cuando el verbo la exige con su significado: llegar a, remontarse a, dedicarse a.
+4. Voz pasiva. El predicado debe corresponder con la dirección de la tripleta. Para la pasiva usa ser + participio en masculino singular: El Instituto Sur fue fundado por Ana Ríos → (Instituto Sur | ser fundado por | Ana Ríos). Nunca cambies el predicado sin cambiar los extremos: (Instituto Sur | fundar | Ana Ríos) es un error.
+5. El se. No lo borres ni lo tomes como agente. Conserva los verbos pronominales (dedicarse a, quejarse de). Una pasiva refleja sin agente no dice quién hizo la acción: El Instituto Sur se fundó en Valparaíso no identifica a su fundador.
+6. Entidades multipalabra. La preposición dentro de un nombre (Universidad de Chile, calidad del agua) no crea una relación aparte entre sus partes.
 
 Ejemplos (la notación entre paréntesis solo ilustra qué relaciones extraer; no es el formato de la respuesta):
 
@@ -26,3 +27,11 @@ Relaciones: (Instituto Sur | ser fundado en | Valparaíso)
 Texto: El Centro Austral se dedica a la calidad del agua y depende de la Universidad de Chile.
 Entidades: Centro Austral, calidad del agua, Universidad de Chile
 Relaciones: (Centro Austral | dedicarse a | calidad del agua), (Centro Austral | depender de | Universidad de Chile)
+
+Texto: El ruido puede afectar a los niños.
+Entidades: ruido, niños
+Relaciones: (ruido | poder afectar | niños)
+
+Texto: El programa une a los pueblos de la región y llegó a Chile.
+Entidades: programa, pueblos de la región, Chile
+Relaciones: (programa | unir | pueblos de la región), (programa | llegar a | Chile)

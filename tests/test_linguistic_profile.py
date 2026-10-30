@@ -217,19 +217,23 @@ _TRIPLE = re.compile(r"\(([^|()]+)\|([^|()]+)\|([^|()]+)\)")
 
 
 def _examples(rules):
-    """(entities, triples) for each example block of a rules file."""
+    """Text, entities and triples of each example block of a rules file."""
     blocks = []
     for block in rules.split("\n\n"):
         lines = dict(
             line.split(": ", 1) for line in block.splitlines() if ": " in line
         )
         if "Entidades" in lines:
-            entities = [e.strip() for e in lines["Entidades"].split(",")]
-            triples = [
-                tuple(part.strip() for part in match)
-                for match in _TRIPLE.findall(lines.get("Relaciones", ""))
-            ]
-            blocks.append((entities, triples))
+            blocks.append(
+                {
+                    "text": lines["Texto"],
+                    "entities": [e.strip() for e in lines["Entidades"].split(",")],
+                    "triples": [
+                        tuple(part.strip() for part in match)
+                        for match in _TRIPLE.findall(lines.get("Relaciones", ""))
+                    ],
+                }
+            )
     return blocks
 
 
@@ -242,28 +246,46 @@ def test_rules_have_no_braces_or_json():
 def test_relation_examples_stay_within_their_entity_list():
     """The same closure the hint for dangling relations asks the model for."""
     examples = _examples(RULES["relations"])
-    assert len(examples) == 5
-    for entities, triples in examples:
-        assert triples
-        for subject, _, obj in triples:
-            assert subject in entities and obj in entities
+    assert len(examples) == 7
+    for example in examples:
+        assert example["triples"]
+        for subject, _, obj in example["triples"]:
+            assert subject in example["entities"] and obj in example["entities"]
 
 
 def test_relation_examples_use_infinitive_predicates():
     """Rule 2: infinitive (or pronominal infinitive) first, spaces not underscores."""
-    for _, triples in _examples(RULES["relations"]):
-        for _, predicate, _ in triples:
+    for example in _examples(RULES["relations"]):
+        for _, predicate, _ in example["triples"]:
             assert "_" not in predicate
             first = predicate.split()[0]
             assert re.search(r"(ar|er|ir)(se)?$", first), predicate
+
+
+def test_relation_examples_keep_modals_and_drop_the_personal_a():
+    """Rule 2 keeps a modal verb, or the infinitive would turn a possibility
+    into a fact (v1.1 kept it by leaving the verb conjugated). Rule 3 leaves
+    out the personal a, so `afecta` and `afecta a` do not become two
+    predicates, but keeps a preposition the verb requires."""
+    examples = _examples(RULES["relations"])
+    for example in examples:
+        if re.search(r"\b(puede|pueden|debe|deben)\b", example["text"]):
+            assert any(
+                predicate.split()[0] in ("poder", "deber")
+                for _, predicate, _ in example["triples"]
+            ), example["text"]
+
+    predicates = {p for example in examples for _, p, _ in example["triples"]}
+    assert {"poder afectar", "unir", "llegar a"} <= predicates
+    assert not {"afectar", "afectar a", "unir a"} & predicates
 
 
 def test_entity_examples_extract_no_pronouns():
     examples = _examples(RULES["entities"])
     assert len(examples) == 3
     pronouns = {"él", "ella", "ellos", "ellas", "lo", "la", "le", "se"}
-    for entities, _ in examples:
-        assert not pronouns & {e.lower() for e in entities}
+    for example in examples:
+        assert not pronouns & {e.lower() for e in example["entities"]}
 
 
 # --------------------------------------------------------------------------

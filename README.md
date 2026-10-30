@@ -343,10 +343,15 @@ default can be attributed to the Spanish adaptation:
 - Null subjects, unstressed pronouns and enclitics (*Luego lo dirigió*,
   *dirigiéndolo*) resolve to an entity from the list; a pronoun is never an
   entity or an endpoint.
-- Predicates in the infinitive with their preposition or pronoun (*fundar*,
-  *depender de*, *dedicarse a*), with spaces, keeping negation and future or
-  conditional forms. Dedup keys already lemmatize predicates this way; the
-  rule makes the visible labels match them.
+- Predicates in the infinitive with the preposition or pronoun the verb
+  requires (*fundar*, *depender de*, *dedicarse a*), with spaces, keeping
+  negation, future or conditional forms and modal verbs (*poder afectar*), so
+  that a possibility does not turn into a fact. Dedup keys already lemmatize
+  predicates this way; the rule makes the visible labels match them.
+- The personal *a* that marks the person or group receiving the action is
+  left out of the predicate (*afectar*, not *afectar a*), while a preposition
+  the verb requires stays (*llegar a*). Otherwise one verb ends up as two
+  predicates with different dedup keys.
 - Passives as *ser* + masculine singular participle, with the predicate
   matching the direction of the triple. *se* is kept and never read as an
   agent.
