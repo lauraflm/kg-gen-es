@@ -99,25 +99,30 @@ class LLMDeduplicate:
         self.retrieval_model = retrieval_model
         self.lm = lm
 
+        # An empty side (no entities, or no predicates) is a valid extraction,
+        # but BM25Okapi divides by the corpus size and KMeans needs a sample,
+        # so it gets no index and `cluster()` skips it. Nothing is ever
+        # retrieved from it: `deduplicate()` has no items to ask about.
         # Embeddings and BM25 tokens for nodes
-        self.node_embeddings = retrieval_model.encode(
-            self.nodes, show_progress_bar=True
-        )
+        self.node_embeddings = self._encode(self.nodes)
         self.node_bm25_tokenized = [text.lower().split() for text in self.nodes]
 
         # Always rebuild BM25 from tokens (it's fast and simpler than serializing the object)
-        self.node_bm25 = BM25Okapi(self.node_bm25_tokenized)
+        self.node_bm25 = BM25Okapi(self.node_bm25_tokenized) if self.nodes else None
 
         # Embeddings and BM25 tokens for edges
-        self.edge_embeddings = retrieval_model.encode(
-            self.edges, show_progress_bar=True
-        )
+        self.edge_embeddings = self._encode(self.edges)
         self.edge_bm25_tokenized = [text.lower().split() for text in self.edges]
 
         # Always rebuild BM25 from tokens
-        self.edge_bm25 = BM25Okapi(self.edge_bm25_tokenized)
+        self.edge_bm25 = BM25Okapi(self.edge_bm25_tokenized) if self.edges else None
 
         dspy.configure(lm=lm)
+
+    def _encode(self, texts: list[str]):
+        if not texts:
+            return np.empty((0, 0), dtype=np.float32)
+        return self.retrieval_model.encode(texts, show_progress_bar=True)
 
     def get_relevant_items(
         self, query: str, top_k: int = 50, type: str = "node"
@@ -163,6 +168,12 @@ class LLMDeduplicate:
 
         for embedding_type, embeddings in embedding_sets.items():
             n_samples = len(embeddings)
+            if n_samples == 0:
+                if embedding_type == "node":
+                    self.node_clusters = []
+                else:
+                    self.edge_clusters = []
+                continue
             num_clusters = max(1, n_samples // cluster_size)
 
             # Step 1: Cluster centers

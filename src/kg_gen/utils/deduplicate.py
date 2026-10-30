@@ -111,6 +111,15 @@ class DeduplicateList:
         # export different forms ("contribuye a" vs "contribuyen a") for no
         # reason. Collect the candidates instead and choose with an explicit
         # rule, which also makes the result reproducible across processes.
+        # SemHash reads `records[0]` and raises IndexError on an empty list.
+        # A graph with no entities (or no predicates) is a valid extraction.
+        if not items:
+            self.deduplicated = []
+            self.deduplicated_items = 0
+            self.duplicate_items = 0
+            self.reduction = 0.0
+            return
+
         def _representative(candidates: set[str]) -> str:
             return min(candidates, key=_representative_sort_key)
 
