@@ -5,7 +5,7 @@ import dspy
 import litellm
 from pydantic import BaseModel
 
-from kg_gen.utils.i18n import pick as _pick
+from kg_gen.utils.i18n import add_profile_rules, pick as _pick
 
 _TEXT_ENTITIES_INSTRUCTIONS = {
     "en": """Extract key entities from the source text. Extracted entities are subjects or objects.
@@ -29,6 +29,13 @@ _ENTITIES_OUTPUT_DESC = {
 }
 
 _ENTITIES_PROMPT_FILES = {"es": "entidades.txt", "en": "entities.txt"}
+
+# An optional linguistic profile (see i18n.LINGUISTIC_PROFILES) appends its
+# rules to the dspy instructions above and to its litellm prompt file. That
+# file is the language's own, with the examples that would contradict the
+# rules replaced (es-v2: "U.S. -> Estados Unidos" invites translating names).
+_ENTITIES_PROFILE_RULES_FILES = {"es-v2": "reglas_es_v2_entidades.txt"}
+_ENTITIES_PROFILE_PROMPT_FILES = {"es-v2": "entidades_es_v2.txt"}
 
 # User-turn wrapper for the litellm path. The XML-ish tags are structural and
 # stay untranslated; only the prose around them varies by language.
@@ -56,7 +63,11 @@ Este es el texto del que debes extraer entidades:
 # would otherwise rebuild it for every chunk. Sharing it across threads is
 # safe, since dspy derives new signature classes rather than mutating them.
 @lru_cache(maxsize=None)
-def _entities_sig(is_conversation: bool, language: str = "en") -> dspy.Signature:
+def _entities_sig(
+    is_conversation: bool,
+    language: str = "en",
+    linguistic_profile: Optional[str] = None,
+) -> dspy.Signature:
     """Build the entity-extraction signature for the requested language.
 
     Replaces upstream's two fixed signature classes (TextEntities /
@@ -69,6 +80,11 @@ def _entities_sig(is_conversation: bool, language: str = "en") -> dspy.Signature
         else _TEXT_ENTITIES_INSTRUCTIONS,
         language,
     )
+    if linguistic_profile is not None:
+        instructions = add_profile_rules(
+            instructions,
+            _read_prompt(_ENTITIES_PROFILE_RULES_FILES[linguistic_profile]),
+        )
 
     class EntitiesSignature(dspy.Signature):
         __doc__ = instructions
@@ -87,11 +103,21 @@ class EntitiesResponse(BaseModel):
     entities: List[str]
 
 
-def _load_entities_prompt(language: str = "en") -> str:
-    """Load the entities prompt template from file."""
-    filename = _pick(_ENTITIES_PROMPT_FILES, language)
+def _read_prompt(filename: str) -> str:
     prompt_path = Path(__file__).parent.parent / "prompts" / filename
     return prompt_path.read_text(encoding="utf-8")
+
+
+def _load_entities_prompt(
+    language: str = "en", linguistic_profile: Optional[str] = None
+) -> str:
+    """Load the entities prompt template from file."""
+    if linguistic_profile is None:
+        return _read_prompt(_pick(_ENTITIES_PROMPT_FILES, language))
+    return add_profile_rules(
+        _read_prompt(_ENTITIES_PROFILE_PROMPT_FILES[linguistic_profile]),
+        _read_prompt(_ENTITIES_PROFILE_RULES_FILES[linguistic_profile]),
+    )
 
 
 def _get_entities_litellm(
@@ -101,8 +127,9 @@ def _get_entities_litellm(
     api_base: Optional[str] = None,
     temperature: float = 0.0,
     language: str = "en",
+    linguistic_profile: Optional[str] = None,
 ) -> List[str]:
-    prompt_template = _load_entities_prompt(language)
+    prompt_template = _load_entities_prompt(language, linguistic_profile)
     user_prompt = _pick(_ENTITIES_USER_PROMPT, language).replace(
         "{input_data}", input_data
     )
@@ -148,6 +175,7 @@ def get_entities(
     api_base: Optional[str] = None,
     temperature: float = 0.0,
     language: str = "en",
+    linguistic_profile: Optional[str] = None,
 ) -> List[str]:
     if use_litellm_prompt and not is_conversation:
         return _get_entities_litellm(
@@ -157,9 +185,10 @@ def get_entities(
             api_base=api_base,
             temperature=temperature,
             language=language,
+            linguistic_profile=linguistic_profile,
         )
 
-    EntitiesSignature = _entities_sig(is_conversation, language)
+    EntitiesSignature = _entities_sig(is_conversation, language, linguistic_profile)
     extract = dspy.Predict(EntitiesSignature)
     result = extract(source_text=input_data)
     return result.entities

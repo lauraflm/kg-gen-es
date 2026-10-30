@@ -1,0 +1,28 @@
+Reglas para el español:
+1. Sujeto tácito y pronombres. Si el verbo no tiene sujeto expreso, recupéralo cuando la concordancia y el discurso lo identifiquen con claridad. Resuelve también los pronombres átonos y los clíticos unidos al verbo (lo, la, le, se lo, dirigiéndolo): usa la entidad de la lista a la que se refieren. Nunca uses un pronombre como sujeto u objeto.
+2. Predicado en infinitivo. Escríbelo en español, en infinitivo y con su preposición o pronombre: fundar, trabajar para, depender de, dedicarse a, ser parte de, ser hermano de. Usa espacios, no guiones bajos. Al pasar a infinitivo no borres la negación ni el tiempo de algo que no ha ocurrido: no fundó → no fundar; fundará y fundaría se mantienen.
+3. Voz pasiva. El predicado debe corresponder con la dirección de la tripleta. Para la pasiva usa ser + participio en masculino singular: El Instituto Sur fue fundado por Ana Ríos → (Instituto Sur | ser fundado por | Ana Ríos). Nunca cambies el predicado sin cambiar los extremos: (Instituto Sur | fundar | Ana Ríos) es un error.
+4. El se. No lo borres ni lo tomes como agente. Conserva los verbos pronominales (dedicarse a, quejarse de). Una pasiva refleja sin agente no dice quién hizo la acción: El Instituto Sur se fundó en Valparaíso no identifica a su fundador.
+5. Entidades multipalabra. La preposición dentro de un nombre (Universidad de Chile, calidad del agua) no crea una relación aparte entre sus partes.
+
+Ejemplos (la notación entre paréntesis solo ilustra qué relaciones extraer; no es el formato de la respuesta):
+
+Texto: Ana Ríos fundó el Instituto Sur. Luego lo dirigió.
+Entidades: Ana Ríos, Instituto Sur
+Relaciones: (Ana Ríos | fundar | Instituto Sur), (Ana Ríos | dirigir | Instituto Sur)
+
+Texto: Ana Ríos fundó el Instituto Sur y continuó dirigiéndolo.
+Entidades: Ana Ríos, Instituto Sur
+Relaciones: (Ana Ríos | fundar | Instituto Sur), (Ana Ríos | dirigir | Instituto Sur)
+
+Texto: El Instituto Sur fue fundado por Ana Ríos.
+Entidades: Instituto Sur, Ana Ríos
+Relaciones: (Instituto Sur | ser fundado por | Ana Ríos)
+
+Texto: El Instituto Sur se fundó en Valparaíso.
+Entidades: Instituto Sur, Valparaíso
+Relaciones: (Instituto Sur | ser fundado en | Valparaíso)
+
+Texto: El Centro Austral se dedica a la calidad del agua y depende de la Universidad de Chile.
+Entidades: Centro Austral, calidad del agua, Universidad de Chile
+Relaciones: (Centro Austral | dedicarse a | calidad del agua), (Centro Austral | depender de | Universidad de Chile)

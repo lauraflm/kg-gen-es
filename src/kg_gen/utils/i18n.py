@@ -11,7 +11,8 @@ never editing call sites.
     pick(_GREETING, "fr")  # -> "Hello"  (no French variant yet)
 """
 
-from typing import Any
+import inspect
+from typing import Any, Optional
 
 # text_normalization imports nothing from kg_gen, so this adds no cycle.
 from kg_gen.utils.text_normalization import require_spacy_model
@@ -23,6 +24,12 @@ from kg_gen.utils.text_normalization import require_spacy_model
 SUPPORTED_LANGUAGES = ("en", "es")
 
 DEFAULT_LANGUAGE = "en"
+
+# Optional linguistic profiles, each mapped to the one language whose prompts
+# it extends. A profile appends a block of rules to that language's default
+# prompts and leaves the rest as it is, so its effect is that block. None,
+# the default, sends the prompts unchanged.
+LINGUISTIC_PROFILES = {"es-v2": "es"}
 
 
 def validate_language(language: str) -> str:
@@ -61,3 +68,41 @@ def pick(table: dict[str, Any], language: str) -> Any:
     the text.
     """
     return table.get(language, table[DEFAULT_LANGUAGE])
+
+
+def validate_linguistic_profile(
+    linguistic_profile: Optional[str], language: str
+) -> Optional[str]:
+    """Raise unless `linguistic_profile` is None or a profile of `language`.
+
+    Checked where the value is accepted, like `validate_language`, so that a
+    profile that cannot apply raises before any LLM calls are paid for. Not
+    raising would leave two silent outcomes: the profile ignored, or Spanish
+    rules appended to another language's prompts.
+    """
+    if linguistic_profile is None:
+        return None
+    if linguistic_profile not in LINGUISTIC_PROFILES:
+        raise ValueError(
+            f"Unknown linguistic_profile {linguistic_profile!r}. "
+            f"Known: {', '.join(LINGUISTIC_PROFILES)}."
+        )
+    if LINGUISTIC_PROFILES[linguistic_profile] != language:
+        raise ValueError(
+            f"linguistic_profile {linguistic_profile!r} applies to language "
+            f"{LINGUISTIC_PROFILES[linguistic_profile]!r}, not {language!r}."
+        )
+    return linguistic_profile
+
+
+def add_profile_rules(prompt: str, rules: str) -> str:
+    """Append a profile's rules after a default prompt, left intact above them.
+
+    The prompt goes through `inspect.cleandoc` first because DSPy does that
+    to signature instructions, and it only dedents the indented continuation
+    lines of the inline defaults when every line shares that indent. The
+    unindented rules would stop it, so the default part would no longer
+    render as it does without the profile. The prompt files have no indent
+    for it to remove.
+    """
+    return f"{inspect.cleandoc(prompt)}\n\n{rules}"

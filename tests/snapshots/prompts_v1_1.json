@@ -1,0 +1,420 @@
+{
+ "en": {
+  "dspy_text": [
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str):\nYour output fields are:\n1. `entities` (list[str]): THOROUGH list of key entities\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extract key entities from the source text. Extracted entities are subjects or objects.\n        This is for an extraction task, please be THOROUGH and accurate to the reference text."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\nRespond with the corresponding output fields, starting with the field `[[ ## entities ## ]]` (must be formatted as a valid Python list[str]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): List of subject-predicate-object tuples. Be thorough.\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Knowledge graph subject-predicate-object tuple.\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Object entity\", \"examples\": [\"Vicky\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicate\", \"examples\": [\"is brother of\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Subject entity\", \"examples\": [\"Kevin\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extract subject-predicate-object triples from the source text.\n        Subject and object must be from entities list. Entities provided were previously extracted from the same source text.\n        This is for an extraction task, please be thorough, accurate, and faithful to the reference text. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   }
+  ],
+  "dspy_text_fallback": [
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str):\nYour output fields are:\n1. `entities` (list[str]): THOROUGH list of key entities\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extract key entities from the source text. Extracted entities are subjects or objects.\n        This is for an extraction task, please be THOROUGH and accurate to the reference text."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\nRespond with the corresponding output fields, starting with the field `[[ ## entities ## ]]` (must be formatted as a valid Python list[str]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): List of subject-predicate-object tuples. Be thorough.\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Knowledge graph subject-predicate-object tuple.\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Object entity\", \"examples\": [\"Vicky\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicate\", \"examples\": [\"is brother of\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Subject entity\", \"examples\": [\"Kevin\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extract subject-predicate-object triples from the source text.\n        Subject and object must be from entities list. Entities provided were previously extracted from the same source text.\n        This is for an extraction task, please be thorough, accurate, and faithful to the reference text. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): List of subject-predicate-object tuples. Be thorough.\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Knowledge graph subject-predicate-object tuple. Subject and object entities must be one of: Ana Ríos\\n- Instituto Sur\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Object entity\", \"examples\": [\"Vicky\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicate\", \"examples\": [\"is brother of\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Subject entity\", \"examples\": [\"Kevin\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extract subject-predicate-object triples from the source text.\n        Subject and object must be from entities list. Entities provided were previously extracted from the same source text.\n        This is for an extraction task, please be thorough, accurate, and faithful to the reference text. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "ChainOfThought",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]): \n3. `relations` (list[Relation]):\nYour output fields are:\n1. `reasoning` (str): \n2. `fixed_relations` (list[Relation]):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## fixed_relations ## ]]\n{fixed_relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Knowledge graph subject-predicate-object tuple. Subject and object entities must be one of: Ana Ríos\\n- Instituto Sur\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Object entity\", \"examples\": [\"Vicky\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicate\", \"examples\": [\"is brother of\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Subject entity\", \"examples\": [\"Kevin\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Fix the relations so that every subject and object of the relations are exact matches to an entity. Keep the predicate the same. The meaning of every relation should stay faithful to the reference text. If you cannot maintain the meaning of the original relation relative to the source text, then do not return it."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\n[[ ## relations ## ]]\n[{\"subject\": \"Ana Ríos\", \"predicate\": \"fundar\", \"object\": \"Instituto Sur\"}]\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## fixed_relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   }
+  ],
+  "dspy_conversation": [
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str):\nYour output fields are:\n1. `entities` (list[str]): THOROUGH list of key entities\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extract key entities from the conversation Extracted entities are subjects or objects.\n        Consider both explicit entities and participants in the conversation.\n        This is for an extraction task, please be THOROUGH and accurate."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nuser: ¿Quién fundó el Instituto Sur?\nassistant: Lo fundó Ana Ríos.\n\nRespond with the corresponding output fields, starting with the field `[[ ## entities ## ]]` (must be formatted as a valid Python list[str]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): List of subject-predicate-object tuples where subject and object are exact matches to items in entities list. Be thorough\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Knowledge graph subject-predicate-object tuple.\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Object entity\", \"examples\": [\"Vicky\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicate\", \"examples\": [\"is brother of\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Subject entity\", \"examples\": [\"Kevin\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extract subject-predicate-object triples from the conversation, including:\n        1. Relations between concepts discussed\n        2. Relations between speakers and concepts (e.g. user asks about X)\n        3. Relations between speakers (e.g. assistant responds to user)\n        Subject and object must be from entities list. Entities provided were previously extracted from the same source text.\n        This is for an extraction task, please be thorough, accurate, and faithful to the reference text. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nuser: ¿Quién fundó el Instituto Sur?\nassistant: Lo fundó Ana Ríos.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   }
+  ],
+  "litellm_text": [
+   {
+    "call": "litellm",
+    "messages": [
+     {
+      "role": "system",
+      "content": "You will be extracting entities from an article to build a knowledge graph.  Your task is to identify important entities mentioned in the article that are likely to have meaningful relationships with other entities, and return them as a deduplicated list.\n\n## Entity Categories\n\nAs you analyze the article, consider entities from these categories:\n- **People**: Individual persons (historical figures, celebrities, authors, politicians, etc.)\n- **Organizations**: Companies, institutions, government bodies, bands, sports teams, non-profits, etc.\n- **Locations**: Cities, countries, regions, landmarks, geographical features, buildings\n- **Dates and Time Periods**: Specific dates, years, or time periods\n- **Events**: Wars, conferences, ceremonies, festivals, competitions, etc.\n- **Creative Works**: Books, films, songs, albums, artworks, publications, TV shows\n- **Concepts**: Ideas, theories, movements, philosophies, fields of study, religions\n- **Products**: Technologies, inventions, software, devices\n\n## Extraction Guidelines\n\nFollow these rules when identifying entities:\n\n1. **Focus on substantive mentions**: Extract entities that are central to the article's topic OR mentioned with meaningful detail or context. Skip entities that appear only in passing with no context.\n\n2. **Prioritize entities with relationship potential**: Since these entities will be used to build a knowledge graph, include only entities that are likely to have clear relationships with other entities in the article. An entity mentioned in isolation without connections to the article's main narrative should typically be excluded.\n\n3. **Use official or common names**: Use the most widely recognized or official name for each entity as it appears in the article.\n\n4. **Avoid overly generic terms**: Do not extract generic terms like \"city\", \"book\", or \"person\" unless they are specifically defined as concepts being discussed in the article.\n\n5. **Use full names for people**: Extract complete names as they first appear (e.g., \"Marie Curie\" rather than just \"Curie\").\n\n6. **Normalize entity names**: If an entity has multiple names or variations in the article, choose one canonical form. For example, normalize \"U.S.\", \"USA\", and \"United States of America\" to \"United States\".\n\n7. **Extract each unique entity only once**: Even if an entity appears multiple times, list it only once in your final output.\n\n8. **Be selective rather than inclusive**: When uncertain about whether an entity meets the criteria (particularly regarding relationship potential), err on the side of exclusion rather than inclusion. It's better to have a focused set of well-connected entities than a comprehensive list with many isolated mentions."
+     },
+     {
+      "role": "user",
+      "content": "\nHere is the text to extract entities from:\n\n<article>\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n</article>\n    "
+     }
+    ],
+    "schema": {
+     "description": "Structured response for entity extraction.",
+     "properties": {
+      "entities": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Entities",
+       "type": "array"
+      }
+     },
+     "required": [
+      "entities"
+     ],
+     "title": "EntitiesResponse",
+     "type": "object",
+     "additionalProperties": false
+    }
+   },
+   {
+    "call": "litellm",
+    "messages": [
+     {
+      "role": "system",
+      "content": "You will extract subject-predicate-object triples from a source text to build a knowledge graph. A list of entities has already been extracted from this text, and your task is to identify the relationships between these entities.\n\nYour task is to extract triples in the form (subject | predicate | object) where:\n- The **subject** must be an entity from the entities list above\n- The **object** must be an entity from the entities list above  \n- The **predicate** describes the relationship between the subject and object\n\n## Extraction Guidelines\n\nFollow these rules when extracting relationships:\n\n**Accuracy and Faithfulness:**\n- Only extract relationships that are explicitly stated or clearly implied in the source text\n- Do not infer relationships that go beyond what the text states\n- Extract only factual relationships (not opinions, hypotheticals, or negated statements)\n\n**Predicate Quality:**\n- Use clear, specific predicates that precisely describe the relationship\n- Examples of good predicates: \"founded_by\", \"located_in\", \"works_for\", \"invented\", \"part_of\", \"owns\", \"manages\", \"created\", \"acquired\"\n- Avoid vague predicates like \"related_to\" or \"associated_with\" unless no more specific relationship can be determined\n\n**Directionality:**\n- Ensure the subject-predicate-object order correctly represents the relationship direction\n- For example: (Apple | founded_by | Steve Jobs) not (Steve Jobs | founded_by | Apple)\n\n**Thoroughness:**\n- Extract ALL meaningful relationships present in the text\n- Pay special attention to entities that might otherwise have no connections—if an entity was included in the list, it is likely important and should have at least one relationship\n- Your goal is to maximize connectivity in the knowledge graph and minimize isolated entities\n\n## Process\n\nBefore providing your final output, work through your analysis systematically inside <analysis> tags. Follow these steps:\n\n1. **Map entities to text**: For each entity in the entities list, quote the relevant passage(s) from the source text where that entity appears or is discussed. This will help you keep track of the context for each entity.\n\n2. **Identify relationships systematically**: Go through the entities and look for connections. For each potential relationship:\n   - Quote the specific text that supports the relationship\n   - Identify the subject entity\n   - Identify the object entity\n   - Determine the predicate that best describes the relationship\n   - Verify the directionality is correct\n   - Confirm this relationship is faithful to the source text\n\n3. **Draft initial triples**: Based on your relationship identification, write out all the triples you've found with a brief note about the supporting evidence.\n\n4. **Check for isolated entities**: Review your list of triples and identify any entities from the entities list that don't appear in any triple. For each isolated entity:\n   - Re-examine the source text quotes you gathered in step 1\n   - Look for indirect or subtle connections you may have missed\n   - Consider whether there are any relationships you can extract\n\n5. **Finalize triples**: Create your final list of verified triples to include in your output."
+     },
+     {
+      "role": "user",
+      "content": "\nHere is the list of entities that were previously extracted from the source text:\n\n<entities>\n- Ana Ríos\n- Instituto Sur\n</entities>\n\nHere is the source text to analyze:\n\n<text>\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n</text>\n    "
+     }
+    ],
+    "schema": {
+     "$defs": {
+      "RelationItem": {
+       "properties": {
+        "subject": {
+         "enum": [
+          "Ana Ríos",
+          "Instituto Sur"
+         ],
+         "title": "Subject",
+         "type": "string"
+        },
+        "predicate": {
+         "title": "Predicate",
+         "type": "string"
+        },
+        "object": {
+         "enum": [
+          "Ana Ríos",
+          "Instituto Sur"
+         ],
+         "title": "Object",
+         "type": "string"
+        }
+       },
+       "required": [
+        "subject",
+        "predicate",
+        "object"
+       ],
+       "title": "RelationItem",
+       "type": "object",
+       "additionalProperties": false
+      }
+     },
+     "properties": {
+      "relations": {
+       "items": {
+        "$ref": "#/$defs/RelationItem"
+       },
+       "title": "Relations",
+       "type": "array"
+      }
+     },
+     "required": [
+      "relations"
+     ],
+     "title": "RelationsResponse",
+     "type": "object",
+     "additionalProperties": false
+    }
+   }
+  ]
+ },
+ "es": {
+  "dspy_text": [
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str):\nYour output fields are:\n1. `entities` (list[str]): Lista EXHAUSTIVA de entidades clave\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extrae las entidades clave del texto fuente. Las entidades extraídas son sujetos u objetos.\n        Esta es una tarea de extracción: sé EXHAUSTIVO y preciso respecto al texto de referencia."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\nRespond with the corresponding output fields, starting with the field `[[ ## entities ## ]]` (must be formatted as a valid Python list[str]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): Lista de tripletas sujeto-predicado-objeto. Sé exhaustivo.\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Tripleta sujeto-predicado-objeto de un grafo de conocimiento.\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad objeto\", \"examples\": [\"Lucía\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicado\", \"examples\": [\"es hermano de\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad sujeto\", \"examples\": [\"Carlos\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extrae tripletas sujeto-predicado-objeto del texto fuente.\n        El sujeto y el objeto deben ser una entidad de la lista de entidades. Las entidades fueron previamente extraídas de este mismo texto fuente.\n        Esta es una tarea de extracción: sé exhaustivo, preciso y fiel al texto de referencia. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   }
+  ],
+  "dspy_text_fallback": [
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str):\nYour output fields are:\n1. `entities` (list[str]): Lista EXHAUSTIVA de entidades clave\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extrae las entidades clave del texto fuente. Las entidades extraídas son sujetos u objetos.\n        Esta es una tarea de extracción: sé EXHAUSTIVO y preciso respecto al texto de referencia."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\nRespond with the corresponding output fields, starting with the field `[[ ## entities ## ]]` (must be formatted as a valid Python list[str]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): Lista de tripletas sujeto-predicado-objeto. Sé exhaustivo.\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Tripleta sujeto-predicado-objeto de un grafo de conocimiento.\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad objeto\", \"examples\": [\"Lucía\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicado\", \"examples\": [\"es hermano de\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad sujeto\", \"examples\": [\"Carlos\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extrae tripletas sujeto-predicado-objeto del texto fuente.\n        El sujeto y el objeto deben ser una entidad de la lista de entidades. Las entidades fueron previamente extraídas de este mismo texto fuente.\n        Esta es una tarea de extracción: sé exhaustivo, preciso y fiel al texto de referencia. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): Lista de tripletas sujeto-predicado-objeto. Sé exhaustivo.\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Tripleta sujeto-predicado-objeto de un grafo de conocimiento. El sujeto y el objeto deben ser una de estas entidades: Ana Ríos\\n- Instituto Sur\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad objeto\", \"examples\": [\"Lucía\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicado\", \"examples\": [\"es hermano de\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad sujeto\", \"examples\": [\"Carlos\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extrae tripletas sujeto-predicado-objeto del texto fuente.\n        El sujeto y el objeto deben ser una entidad de la lista de entidades. Las entidades fueron previamente extraídas de este mismo texto fuente.\n        Esta es una tarea de extracción: sé exhaustivo, preciso y fiel al texto de referencia. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "ChainOfThought",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]): \n3. `relations` (list[Relation]):\nYour output fields are:\n1. `reasoning` (str): \n2. `fixed_relations` (list[Relation]):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## fixed_relations ## ]]\n{fixed_relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Tripleta sujeto-predicado-objeto de un grafo de conocimiento. El sujeto y el objeto deben ser una de estas entidades: Ana Ríos\\n- Instituto Sur\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad objeto\", \"examples\": [\"Lucía\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicado\", \"examples\": [\"es hermano de\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad sujeto\", \"examples\": [\"Carlos\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Corrige las relaciones para que el sujeto y el objeto de cada una coincidan exactamente con una entidad. Mantén el mismo predicado. El significado de cada relación debe seguir siendo fiel al texto de referencia. Si no puedes conservar el significado de la relación original respecto al texto fuente, no la devuelvas."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\n[[ ## relations ## ]]\n[{\"subject\": \"Ana Ríos\", \"predicate\": \"fundar\", \"object\": \"Instituto Sur\"}]\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## fixed_relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   }
+  ],
+  "dspy_conversation": [
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str):\nYour output fields are:\n1. `entities` (list[str]): Lista EXHAUSTIVA de entidades clave\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extrae las entidades clave de la conversación. Las entidades extraídas son sujetos u objetos.\n        Considera tanto las entidades explícitas como los participantes de la conversación.\n        Esta es una tarea de extracción: sé EXHAUSTIVO y preciso."
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nuser: ¿Quién fundó el Instituto Sur?\nassistant: Lo fundó Ana Ríos.\n\nRespond with the corresponding output fields, starting with the field `[[ ## entities ## ]]` (must be formatted as a valid Python list[str]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   },
+   {
+    "call": "Predict",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Your input fields are:\n1. `source_text` (str): \n2. `entities` (list[str]):\nYour output fields are:\n1. `relations` (list[Relation]): Lista de tripletas sujeto-predicado-objeto donde el sujeto y el objeto coinciden exactamente con elementos de la lista de entidades. Sé exhaustivo.\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## source_text ## ]]\n{source_text}\n\n[[ ## entities ## ]]\n{entities}\n\n[[ ## relations ## ]]\n{relations}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"$defs\": {\"Relation\": {\"type\": \"object\", \"description\": \"Tripleta sujeto-predicado-objeto de un grafo de conocimiento.\", \"properties\": {\"object\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad objeto\", \"examples\": [\"Lucía\"], \"title\": \"Object\"}, \"predicate\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Predicado\", \"examples\": [\"es hermano de\"], \"title\": \"Predicate\"}, \"subject\": {\"type\": \"string\", \"__dspy_field_type\": \"input\", \"desc\": \"Entidad sujeto\", \"examples\": [\"Carlos\"], \"title\": \"Subject\"}}, \"required\": [\"subject\", \"predicate\", \"object\"], \"title\": \"Relation\"}}, \"items\": {\"$ref\": \"#/$defs/Relation\"}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Extrae tripletas sujeto-predicado-objeto de la conversación, incluyendo:\n        1. Relaciones entre los conceptos discutidos\n        2. Relaciones entre los interlocutores y los conceptos (ej. el usuario pregunta sobre X)\n        3. Relaciones entre los interlocutores (ej. el asistente responde al usuario)\n        El sujeto y el objeto deben ser una entidad de la lista de entidades. Las entidades fueron previamente extraídas de este mismo texto fuente.\n        Esta es una tarea de extracción: sé exhaustivo, preciso y fiel al texto de referencia. "
+     },
+     {
+      "role": "user",
+      "content": "[[ ## source_text ## ]]\nuser: ¿Quién fundó el Instituto Sur?\nassistant: Lo fundó Ana Ríos.\n\n[[ ## entities ## ]]\n[\"Ana Ríos\", \"Instituto Sur\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## relations ## ]]` (must be formatted as a valid Python list[Relation]), and then ending with the marker for `[[ ## completed ## ]]`."
+     }
+    ]
+   }
+  ],
+  "litellm_text": [
+   {
+    "call": "litellm",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Extraerás entidades de un artículo para construir un grafo de conocimiento. Tu tarea es identificar las entidades importantes mencionadas en el artículo que probablemente tengan relaciones significativas con otras entidades, y devolverlas como una lista sin duplicados.\n\n## Categorías de entidades\n\nAl analizar el artículo, considera entidades pertenecientes a las siguientes categorías:\n\n* **Personas**: Personas individuales (figuras históricas, celebridades, autores, políticos, etc.).\n* **Organizaciones**: Empresas, instituciones, organismos gubernamentales, bandas, equipos deportivos, organizaciones sin fines de lucro, etc.\n* **Lugares**: Ciudades, países, regiones, monumentos, accidentes geográficos, edificios.\n* **Fechas y períodos de tiempo**: Fechas específicas, años o períodos temporales.\n* **Eventos**: Guerras, conferencias, ceremonias, festivales, competiciones, etc.\n* **Obras creativas**: Libros, películas, canciones, álbumes, obras de arte, publicaciones, programas de televisión.\n* **Conceptos**: Ideas, teorías, movimientos, filosofías, áreas de estudio, religiones.\n* **Productos**: Tecnologías, inventos, software, dispositivos.\n\n## Directrices de extracción\n\nSigue estas reglas al identificar entidades:\n\n1. **Céntrate en menciones sustantivas**: Extrae entidades que sean centrales para el tema del artículo O que sean mencionadas con un nivel significativo de detalle o contexto. Omite las entidades que aparezcan únicamente de pasada y sin contexto.\n\n2. **Prioriza entidades con potencial de relación**: Dado que estas entidades se utilizarán para construir un grafo de conocimiento, incluye únicamente aquellas que probablemente tengan relaciones claras con otras entidades del artículo. Una entidad mencionada de forma aislada y sin conexiones con la narrativa principal del artículo normalmente debería excluirse.\n\n3. **Utiliza nombres oficiales o de uso común**: Usa el nombre oficial o más ampliamente reconocido de cada entidad, según aparezca en el artículo.\n\n4. **Evita términos excesivamente genéricos**: No extraigas términos genéricos como `\"ciudad\"`, `\"libro\"` o `\"persona\"`, a menos que estén definidos específicamente como conceptos que se estén discutiendo en el artículo.\n\n5. **Utiliza nombres completos para las personas**: Extrae los nombres completos tal como aparecen por primera vez (por ejemplo, `\"Marie Curie\"` en lugar de simplemente `\"Curie\"`).\n\n6. **Normaliza los nombres de las entidades**: Si una entidad aparece con varios nombres o variantes dentro del artículo, selecciona una única forma canónica. Por ejemplo, normaliza `\"U.S.\"`, `\"USA\"` y `\"United States of America\"` como `\"Estados Unidos\"`.\n\n7. **Extrae cada entidad única una sola vez**: Aunque una entidad aparezca varias veces, inclúyela solo una vez en la salida final.\n\n8. **Sé selectivo en lugar de inclusivo**: Cuando exista duda sobre si una entidad cumple los criterios, especialmente en lo relativo a su potencial de relación, opta por excluirla en lugar de incluirla. Es preferible contar con un conjunto acotado de entidades bien conectadas que con una lista exhaustiva que contenga muchas menciones aisladas."
+     },
+     {
+      "role": "user",
+      "content": "\nEste es el texto del que debes extraer entidades:\n\n<article>\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n</article>\n    "
+     }
+    ],
+    "schema": {
+     "description": "Structured response for entity extraction.",
+     "properties": {
+      "entities": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Entities",
+       "type": "array"
+      }
+     },
+     "required": [
+      "entities"
+     ],
+     "title": "EntitiesResponse",
+     "type": "object",
+     "additionalProperties": false
+    }
+   },
+   {
+    "call": "litellm",
+    "messages": [
+     {
+      "role": "system",
+      "content": "Extraerás tripletas sujeto-predicado-objeto a partir de un texto fuente para construir un grafo de conocimiento. Ya se ha extraído de este texto una lista de entidades, y tu tarea es identificar las relaciones entre estas entidades.\n\nTu tarea es extraer tripletas con la forma (sujeto | predicado | objeto), donde:\n\n* El **sujeto** debe ser una entidad de la lista de entidades anterior.\n* El **objeto** debe ser una entidad de la lista de entidades anterior.\n* El **predicado** describe la relación entre el sujeto y el objeto.\n\n## Directrices de extracción\n\nSigue estas reglas al extraer relaciones:\n\n**Precisión y fidelidad:**\n\n* Extrae únicamente relaciones que estén explícitamente indicadas o claramente implicadas en el texto fuente.\n* No infieras relaciones que vayan más allá de lo que establece el texto.\n* Extrae únicamente relaciones factuales (no opiniones, situaciones hipotéticas ni afirmaciones negadas).\n\n**Calidad de los predicados:**\n\n* Utiliza predicados claros y específicos que describan con precisión la relación.\n* Ejemplos de buenos predicados: `\"fundado_por\"`, `\"ubicado_en\"`, `\"trabaja_para\"`, `\"inventó\"`, `\"parte_de\"`, `\"posee\"`, `\"administra\"`, `\"creó\"`, `\"adquirió\"`.\n* Evita predicados vagos como `\"relacionado_con\"` o `\"asociado_con\"`, a menos que no sea posible determinar una relación más específica.\n\n**Direccionalidad:**\n\n* Asegúrate de que el orden sujeto-predicado-objeto represente correctamente la dirección de la relación.\n* Por ejemplo: `(Apple | fundado_por | Steve Jobs)` y no `(Steve Jobs | fundado_por | Apple)`.\n\n**Exhaustividad:**\n\n* Extrae TODAS las relaciones significativas presentes en el texto.\n* Presta especial atención a las entidades que, de otro modo, podrían quedar sin conexiones: si una entidad fue incluida en la lista, probablemente sea importante y debería tener al menos una relación.\n* Tu objetivo es maximizar la conectividad del grafo de conocimiento y minimizar la cantidad de entidades aisladas.\n\n## Proceso\n\nAntes de proporcionar tu respuesta final, desarrolla tu análisis sistemáticamente dentro de las etiquetas correspondientes. Sigue estos pasos:\n\n1. **Mapear las entidades al texto**: Para cada entidad de la lista de entidades, cita el o los fragmentos relevantes del texto fuente en los que dicha entidad aparezca o sea mencionada. Esto te ayudará a mantener el contexto asociado a cada entidad.\n\n2. **Identificar relaciones sistemáticamente**: Recorre las entidades y busca conexiones entre ellas. Para cada relación potencial:\n\n   * Cita el fragmento específico del texto que respalda la relación.\n   * Identifica la entidad que actúa como sujeto.\n   * Identifica la entidad que actúa como objeto.\n   * Determina el predicado que mejor describe la relación.\n   * Verifica que la direccionalidad sea correcta.\n   * Confirma que la relación sea fiel al texto fuente.\n\n3. **Redactar las tripletas iniciales**: A partir de las relaciones identificadas, escribe todas las tripletas encontradas junto con una breve nota sobre la evidencia que las respalda.\n\n4. **Comprobar entidades aisladas**: Revisa tu lista de tripletas e identifica cualquier entidad de la lista de entidades que no aparezca en ninguna tripleta. Para cada entidad aislada:\n\n   * Vuelve a examinar los fragmentos del texto fuente recopilados en el paso 1.\n   * Busca conexiones indirectas o sutiles que puedas haber pasado por alto.\n   * Considera si existe alguna relación adicional que pueda extraerse.\n\n5. **Finalizar las tripletas**: Crea la lista final de tripletas verificadas que se incluirán en la salida."
+     },
+     {
+      "role": "user",
+      "content": "\nEsta es la lista de entidades extraídas previamente del texto fuente:\n\n<entities>\n- Ana Ríos\n- Instituto Sur\n</entities>\n\nEste es el texto fuente que debes analizar:\n\n<text>\nAna Ríos fundó el Instituto Sur. Luego lo dirigió.\n</text>\n    "
+     }
+    ],
+    "schema": {
+     "$defs": {
+      "RelationItem": {
+       "properties": {
+        "subject": {
+         "enum": [
+          "Ana Ríos",
+          "Instituto Sur"
+         ],
+         "title": "Subject",
+         "type": "string"
+        },
+        "predicate": {
+         "title": "Predicate",
+         "type": "string"
+        },
+        "object": {
+         "enum": [
+          "Ana Ríos",
+          "Instituto Sur"
+         ],
+         "title": "Object",
+         "type": "string"
+        }
+       },
+       "required": [
+        "subject",
+        "predicate",
+        "object"
+       ],
+       "title": "RelationItem",
+       "type": "object",
+       "additionalProperties": false
+      }
+     },
+     "properties": {
+      "relations": {
+       "items": {
+        "$ref": "#/$defs/RelationItem"
+       },
+       "title": "Relations",
+       "type": "array"
+      }
+     },
+     "required": [
+      "relations"
+     ],
+     "title": "RelationsResponse",
+     "type": "object",
+     "additionalProperties": false
+    }
+   }
+  ]
+ }
+}

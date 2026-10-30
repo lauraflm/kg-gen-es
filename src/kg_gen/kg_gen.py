@@ -8,7 +8,7 @@ from kg_gen.utils.chunk_text import chunk_text
 from kg_gen.utils.extraction_stats import ExtractionStats
 from kg_gen.utils.visualize_kg import visualize as visualize_kg
 from kg_gen.models import Graph
-from kg_gen.utils.i18n import validate_language
+from kg_gen.utils.i18n import validate_language, validate_linguistic_profile
 import dspy
 import json
 import os
@@ -41,6 +41,7 @@ class KGGen:
         # ---- Multilingual params ----
         language: str = "en",
         semhash_model_name: Optional[str] = None,
+        linguistic_profile: Optional[str] = None,
     ):
         """Initialize KGGen with optional model configuration
 
@@ -53,6 +54,10 @@ class KGGen:
             semhash_model_name: HuggingFace model name for SemHash encoder.
                 If None, uses SemHash default (potion-base-8M).
                 For multilingual: "minishlab/potion-multilingual-128M".
+            linguistic_profile: Optional extra extraction rules for one
+                language. "es-v2" (requires language="es") appends Spanish
+                rules to the entity and relation prompts. If None, the
+                prompts are exactly the language's defaults.
         """
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -65,6 +70,9 @@ class KGGen:
         self.disable_cache = disable_cache
         self.language = validate_language(language)
         self.semhash_model_name = semhash_model_name
+        self.linguistic_profile = validate_linguistic_profile(
+            linguistic_profile, self.language
+        )
 
         self.init_model(
             model=model,
@@ -89,6 +97,19 @@ class KGGen:
         if language is None:
             return self.language
         return validate_language(language)
+
+    def _resolve_linguistic_profile(
+        self, linguistic_profile: Optional[str], language: str
+    ) -> Optional[str]:
+        """Resolve a per-call profile override against the instance default.
+
+        Checked against the call's resolved language, not the instance's: a
+        per-call `language` override can make the instance profile
+        inapplicable, and that has to raise before any LLM calls too.
+        """
+        if linguistic_profile is None:
+            linguistic_profile = self.linguistic_profile
+        return validate_linguistic_profile(linguistic_profile, language)
 
     def validate_max_tokens(self, max_tokens: int):
         if "gpt-5" in self.model and max_tokens < 16000:
@@ -190,6 +211,7 @@ class KGGen:
         language: Optional[str] = None,
         semhash_model_name: Optional[str] = None,
         stats: Optional[ExtractionStats] = None,
+        linguistic_profile: Optional[str] = None,
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -206,6 +228,8 @@ class KGGen:
                 collecting never changes the extracted graph. Only attempts
                 that succeed are counted, so a context-length retry is not
                 counted twice
+            linguistic_profile: Override instance linguistic profile for
+                this call; it must apply to the call's language
 
         Returns:
             Graph: Generated knowledge graph
@@ -214,6 +238,9 @@ class KGGen:
         # Resolve multilingual params (call-level override > instance default)
         _language = self._resolve_language(language)
         _semhash_model_name = semhash_model_name or self.semhash_model_name
+        _linguistic_profile = self._resolve_linguistic_profile(
+            linguistic_profile, _language
+        )
 
         # Process input data
         is_conversation = isinstance(input_data, list)
@@ -271,6 +298,7 @@ class KGGen:
                     if temperature is not None
                     else self.temperature,
                     language=_language,
+                    linguistic_profile=_linguistic_profile,
                 )
                 relations = get_relations(
                     content,
@@ -285,6 +313,7 @@ class KGGen:
                     else self.temperature,
                     language=_language,
                     stats=attempt_stats,
+                    linguistic_profile=_linguistic_profile,
                 )
                 if attempt_stats is not None:
                     attempt_stats.record_chunk(content)

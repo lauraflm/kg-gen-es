@@ -8,7 +8,7 @@ import litellm
 from pydantic import BaseModel, create_model, ValidationError
 
 from kg_gen.utils.extraction_stats import ExtractionStats
-from kg_gen.utils.i18n import pick as _pick
+from kg_gen.utils.i18n import add_profile_rules, pick as _pick
 
 
 def parse_relations_response(
@@ -97,6 +97,14 @@ def parse_relations_response(
 
 
 _RELATIONS_PROMPT_FILES = {"es": "relaciones.txt", "en": "relations.txt"}
+
+# An optional linguistic profile (see i18n.LINGUISTIC_PROFILES) appends its
+# rules to the dspy instructions below and to its litellm prompt file. That
+# file is the language's own, with the predicate examples rewritten so they
+# do not contradict the rules (es-v2: infinitives with spaces, not
+# `fundado_por` or `inventó`).
+_RELATIONS_PROFILE_RULES_FILES = {"es-v2": "reglas_es_v2_relaciones.txt"}
+_RELATIONS_PROFILE_PROMPT_FILES = {"es-v2": "relaciones_es_v2.txt"}
 
 # Inline instructions for the default dspy.Predict path (as opposed to the
 # litellm path, which loads the more elaborate prompts/relations.txt or
@@ -214,13 +222,28 @@ _RELATION_EXAMPLES = {
     },
 }
 
+# A profile whose rules fix the predicate form replaces the predicate example
+# too; otherwise the JSON schema in the prompt would contradict the rules.
+_PROFILE_RELATION_EXAMPLES = {
+    "es-v2": {
+        "subject": ["Carlos"],
+        "predicate": ["ser hermano de"],
+        "object": ["Lucía"],
+    },
+}
+
 
 # Cached so get_relations does not rebuild the model for every chunk; its
-# callers pass only `language` here. The fallback path's `doc` embeds that
-# chunk's entity list, so fallback_extraction_sig calls `__wrapped__` instead:
-# caching it would keep one class per chunk alive for nothing.
+# callers pass only `language` and `linguistic_profile` here. The fallback
+# path's `doc` embeds that chunk's entity list, so fallback_extraction_sig
+# calls `__wrapped__` instead: caching it would keep one class per chunk
+# alive for nothing.
 @lru_cache(maxsize=None)
-def _relation_model(language: str, doc: Optional[str] = None) -> Type[BaseModel]:
+def _relation_model(
+    language: str,
+    doc: Optional[str] = None,
+    linguistic_profile: Optional[str] = None,
+) -> Type[BaseModel]:
     """Build the subject-predicate-object model with language-appropriate
     field descriptions and few-shot examples.
 
@@ -228,7 +251,10 @@ def _relation_model(language: str, doc: Optional[str] = None) -> Type[BaseModel]
     the allowed entity list.
     """
     descs = _pick(_RELATION_FIELD_DESCS, language)
-    examples = _pick(_RELATION_EXAMPLES, language)
+    if linguistic_profile is not None:
+        examples = _PROFILE_RELATION_EXAMPLES[linguistic_profile]
+    else:
+        examples = _pick(_RELATION_EXAMPLES, language)
 
     class Relation(BaseModel):
         __doc__ = doc if doc is not None else _pick(_RELATION_DOC, language)
@@ -244,11 +270,21 @@ def _relation_model(language: str, doc: Optional[str] = None) -> Type[BaseModel]
     return Relation
 
 
-def _load_relations_prompt(language: str = "en") -> str:
-    """Load the relations prompt template from file."""
-    filename = _pick(_RELATIONS_PROMPT_FILES, language)
+def _read_prompt(filename: str) -> str:
     prompt_path = Path(__file__).parent.parent / "prompts" / filename
     return prompt_path.read_text(encoding="utf-8")
+
+
+def _load_relations_prompt(
+    language: str = "en", linguistic_profile: Optional[str] = None
+) -> str:
+    """Load the relations prompt template from file."""
+    if linguistic_profile is None:
+        return _read_prompt(_pick(_RELATIONS_PROMPT_FILES, language))
+    return add_profile_rules(
+        _read_prompt(_RELATIONS_PROFILE_PROMPT_FILES[linguistic_profile]),
+        _read_prompt(_RELATIONS_PROFILE_RULES_FILES[linguistic_profile]),
+    )
 
 
 def _build_relations_user_prompt(
@@ -304,13 +340,14 @@ def _get_relations_litellm(
     temperature: float = 0.0,
     language: str = "en",
     stats: Optional[ExtractionStats] = None,
+    linguistic_profile: Optional[str] = None,
 ) -> List[Tuple[str, str, str]]:
     # `Literal[()]` cannot be built, and with no entities there is nothing
     # the model could relate: an empty extraction is a valid result.
     if not entities:
         return []
 
-    prompt_template = _load_relations_prompt(language)
+    prompt_template = _load_relations_prompt(language, linguistic_profile)
     user_prompt = _build_relations_user_prompt(language, entities, input_data)
 
     # Create dynamic model with entity constraints
@@ -357,18 +394,30 @@ def _get_relations_litellm(
 # get_relations, the cached one. Bounded rather than unbounded because
 # `context` is free text from the caller. The fallback bypasses this cache
 # too, since its Relation class is new for every chunk.
+def _relations_doc(
+    instructions: str, context: str, linguistic_profile: Optional[str]
+) -> str:
+    doc = f"{instructions} {context}"
+    if linguistic_profile is None:
+        return doc
+    return add_profile_rules(
+        doc, _read_prompt(_RELATIONS_PROFILE_RULES_FILES[linguistic_profile])
+    )
+
+
 @lru_cache(maxsize=128)
 def extraction_sig(
     Relation: BaseModel,
     is_conversation: bool,
     context: str = "",
     language: str = "en",
+    linguistic_profile: Optional[str] = None,
 ) -> dspy.Signature:
     if not is_conversation:
         instructions = _pick(_TEXT_RELATIONS_INSTRUCTIONS, language)
 
         class ExtractTextRelations(dspy.Signature):
-            __doc__ = f"{instructions} {context}"
+            __doc__ = _relations_doc(instructions, context, linguistic_profile)
 
             source_text: str = dspy.InputField()
             entities: list[str] = dspy.InputField()
@@ -381,7 +430,7 @@ def extraction_sig(
         instructions = _pick(_CONVERSATION_RELATIONS_INSTRUCTIONS, language)
 
         class ExtractConversationRelations(dspy.Signature):
-            __doc__ = f"{instructions} {context}"
+            __doc__ = _relations_doc(instructions, context, linguistic_profile)
 
             source_text: str = dspy.InputField()
             entities: list[str] = dspy.InputField()
@@ -393,7 +442,11 @@ def extraction_sig(
 
 
 def fallback_extraction_sig(
-    entities, is_conversation, context: str = "", language: str = "en"
+    entities,
+    is_conversation,
+    context: str = "",
+    language: str = "en",
+    linguistic_profile: Optional[str] = None,
 ) -> dspy.Signature:
     """This fallback extraction does not strictly type the subject and object strings."""
 
@@ -405,10 +458,11 @@ def fallback_extraction_sig(
     Relation = _relation_model.__wrapped__(
         language,
         doc=_pick(_FALLBACK_RELATION_DOC, language).format(entities_str=entities_str),
+        linguistic_profile=linguistic_profile,
     )
 
     return Relation, extraction_sig.__wrapped__(
-        Relation, is_conversation, context, language
+        Relation, is_conversation, context, language, linguistic_profile
     )
 
 
@@ -429,6 +483,7 @@ def get_relations(
     temperature: float = 0.0,
     language: str = "en",
     stats: Optional[ExtractionStats] = None,
+    linguistic_profile: Optional[str] = None,
 ) -> List[Tuple[str, str, str]]:
     # Filter out entities containing backslashes
     entities = _filter_entities(entities)
@@ -445,14 +500,17 @@ def get_relations(
             temperature=temperature,
             language=language,
             stats=stats,
+            linguistic_profile=linguistic_profile,
         )
 
     if stats is not None:
         stats.record_route("dspy")
 
-    Relation = _relation_model(language)
+    Relation = _relation_model(language, linguistic_profile=linguistic_profile)
 
-    ExtractRelations = extraction_sig(Relation, is_conversation, context, language)
+    ExtractRelations = extraction_sig(
+        Relation, is_conversation, context, language, linguistic_profile
+    )
 
     try:
         extract = dspy.Predict(ExtractRelations)
@@ -471,11 +529,13 @@ def get_relations(
         if stats is not None:
             stats.increment("fallback_invoked")
         Relation, ExtractRelations = fallback_extraction_sig(
-            entities, is_conversation, context, language
+            entities, is_conversation, context, language, linguistic_profile
         )
         extract = dspy.Predict(ExtractRelations)
         result = extract(source_text=input_data, entities=entities)
 
+        # No profile rules here: this step must keep each predicate as it is,
+        # and the extraction it repairs already had them.
         class FixedRelations(dspy.Signature):
             __doc__ = _pick(_FIXED_RELATIONS_INSTRUCTIONS, language)
 

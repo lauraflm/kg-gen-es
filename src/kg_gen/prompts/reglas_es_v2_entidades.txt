@@ -1,0 +1,17 @@
+Reglas para el español:
+1. Entidades multipalabra. Mantenlas completas, con sus preposiciones y contracciones: Universidad de Chile, calidad del agua, enfermedad de Alzheimer. No agregues sus partes (Chile) como entidades aparte salvo que el texto hable de ellas por separado.
+2. Grafía. Conserva tildes, ñ y la escritura del texto. No traduzcas nombres.
+3. Artículos. Conserva los que forman parte de un nombre propio o de un título: El Salvador, La Habana, El País.
+4. Sujeto tácito, pronombres y clíticos. No son entidades nuevas: si se refieren a una entidad ya nombrada, usa ese nombre. Nunca extraigas pronombres (él, ella, lo, se) como entidades.
+5. Género y número. Distinguen referentes: el investigador, la investigadora y los investigadores pueden ser personas o grupos distintos. Si el texto nombra a una persona y después la menciona por su cargo sin ambigüedad (Ana Ríos… la investigadora), usa su nombre.
+
+Ejemplos (solo ilustran qué entidades extraer; no son el formato de la respuesta):
+
+Texto: Ana Ríos fundó el Instituto Sur. Luego lo dirigió.
+Entidades: Ana Ríos, Instituto Sur
+
+Texto: La Universidad de Chile y el Banco de España estudian la calidad del agua.
+Entidades: Universidad de Chile, Banco de España, calidad del agua
+
+Texto: El investigador Luis trabajó con las investigadoras Ana y Marta en La Habana.
+Entidades: Luis, Ana, Marta, La Habana

@@ -210,6 +210,8 @@ clustered_graph = kg.cluster(
 - `language`: language code (e.g. `"es"`). Selects the language of every prompt sent to the LLM, plus the sentence splitter and lemmatization rules. Defaults to `"en"`.
 - `semhash_model_name`: HuggingFace [Model2Vec](https://github.com/MinishLab/model2vec) encoder used by SemHash. For multilingual/Spanish text, use `"minishlab/potion-multilingual-128M"` instead of the English-only SemHash default.
 
+A third one, `linguistic_profile`, adds optional language-specific extraction rules (init time or per call in `generate()`); see [the `es-v2` profile](#optional-linguistic-profile-es-v2).
+
 ```python
 kg = KGGen(
   model="gemini/gemini-2.5-flash",
@@ -323,6 +325,54 @@ language and so belongs to an experimental branch:
   (`endpoint_missing_either`).
 - `context` is accepted by `generate()` but never forwarded to the extractors.
 - Chunking, JSON parsing leniency and retry classification are unchanged.
+
+#### Optional linguistic profile: `es-v2`
+`linguistic_profile="es-v2"`, with `language="es"`, appends a block of Spanish
+extraction rules to the entity and relation prompts. It is off by default, and
+off means the prompts are exactly v1.1's: `tests/test_linguistic_profile.py`
+compares every prompt the extraction steps send against a snapshot rendered
+from the `v1.1` tag.
+
+```python
+kg = KGGen(model="openai/gpt-4o", language="es", linguistic_profile="es-v2")
+```
+
+The rules cover only what is specific to Spanish, so a difference against the
+default can be attributed to the Spanish adaptation:
+
+- Null subjects, unstressed pronouns and enclitics (*Luego lo dirigió*,
+  *dirigiéndolo*) resolve to an entity from the list; a pronoun is never an
+  entity or an endpoint.
+- Predicates in the infinitive with their preposition or pronoun (*fundar*,
+  *depender de*, *dedicarse a*), with spaces, keeping negation and future or
+  conditional forms. Dedup keys already lemmatize predicates this way; the
+  rule makes the visible labels match them.
+- Passives as *ser* + masculine singular participle, with the predicate
+  matching the direction of the triple. *se* is kept and never read as an
+  agent.
+- Multi-word entities keep their prepositions and contractions (*calidad del
+  agua*), proper-name articles (*La Habana*) and spelling; names are not
+  translated; grammatical gender and number tell referents apart.
+
+Everything else is left as in the default prompts, including the choices that
+would change what a graph represents in any language: edge orientation,
+whether negated or hedged statements are extracted, and connectivity versus
+faithfulness. The rules are in
+[`prompts/reglas_es_v2_entidades.txt`](src/kg_gen/prompts/reglas_es_v2_entidades.txt)
+and [`prompts/reglas_es_v2_relaciones.txt`](src/kg_gen/prompts/reglas_es_v2_relaciones.txt).
+Their examples write triples as `(subject | predicate | object)`, never as
+JSON, so they do not compete with the output format DSPy asks for.
+
+On the DSPy path the rules are appended to the instructions of every
+signature except the fallback's fix step, which has to keep each predicate as
+it is, and the predicate example in the relation schema becomes `ser hermano
+de`. On the `no_dspy=True` path they are appended to
+[`entidades_es_v2.txt`](src/kg_gen/prompts/entidades_es_v2.txt) and
+[`relaciones_es_v2.txt`](src/kg_gen/prompts/relaciones_es_v2.txt): the Spanish
+files with the examples that contradicted the rules rewritten (`U.S. →
+Estados Unidos`, `fundado_por`, `inventó`). No dedup step changes. An unknown
+profile, or one whose language is not the call's, raises `ValueError` before
+any LLM call.
 
 #### Requirements and fallback behavior
 Non-English `language` values require a spaCy model for lemmatization (Spanish uses `es_core_news_md`). Install it separately, since spaCy models aren't installed as regular pip dependencies:
