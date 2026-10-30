@@ -203,3 +203,129 @@ def test_entity_named_like_a_placeholder_is_not_replaced_by_the_text(language):
     assert "TEXTO {entities_str} fuente" in prompt
 
 
+def test_from_file_reads_utf8(cp1252_default, tmp_path):
+    path = tmp_path / "grafo.json"
+    path.write_text(
+        json.dumps(
+            {
+                "entities": ["Niño", "José"],
+                "edges": ["quiere a"],
+                "relations": [["Niño", "quiere a", "José"]],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    graph = kg_gen_module.KGGen.from_file(str(path))
+
+    assert graph.entities == {"Niño", "José"}
+
+
+# --------------------------------------------------------------------------
+# export_graph
+# --------------------------------------------------------------------------
+
+
+def test_export_graph_to_a_bare_filename(tmp_path, monkeypatch):
+    """`os.path.dirname("grafo.json")` is "", and `os.makedirs("")` raises."""
+    monkeypatch.chdir(tmp_path)
+    graph = Graph(entities={"Niño"}, edges={"es"}, relations=set())
+
+    kg_gen_module.KGGen.export_graph(graph, "grafo.json")
+
+    assert json.loads((tmp_path / "grafo.json").read_text(encoding="utf-8"))[
+        "entities"
+    ] == ["Niño"]
+
+
+# --------------------------------------------------------------------------
+# temperature=0.0 as an override
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def recorded_init(monkeypatch):
+    """A KGGen whose extraction steps are stubbed and whose `init_model`
+    calls are recorded."""
+    monkeypatch.setattr(
+        kg_gen_module, "get_entities", lambda *a, **k: ["Ana", "Luis"]
+    )
+    monkeypatch.setattr(
+        kg_gen_module, "get_relations", lambda *a, **k: [("Ana", "conoce a", "Luis")]
+    )
+    kg = kg_gen_module.KGGen(
+        model="openai/fake-model", api_key="test-key", temperature=0.8
+    )
+    calls = []
+    real_init = kg.init_model
+
+    def spy(**kwargs):
+        calls.append(kwargs)
+        return real_init(**kwargs)
+
+    monkeypatch.setattr(kg, "init_model", spy)
+    return kg, calls
+
+
+def test_generate_applies_a_zero_temperature_override(recorded_init):
+    """`any([..., 0.0])` is False and `0.0 or self.temperature` is 0.8."""
+    kg, calls = recorded_init
+
+    kg.generate("Ana conoce a Luis.", deduplication_method=None, temperature=0.0)
+
+    assert [c["temperature"] for c in calls] == [0.0]
+    assert kg.temperature == 0.0
+
+
+def test_generate_without_overrides_does_not_reinitialize(recorded_init):
+    kg, calls = recorded_init
+
+    kg.generate("Ana conoce a Luis.", deduplication_method=None)
+
+    assert calls == []
+    assert kg.temperature == 0.8
+
+
+def test_deduplicate_applies_a_zero_temperature_override(recorded_init, monkeypatch):
+    kg, calls = recorded_init
+    monkeypatch.setattr(kg_gen_module, "run_deduplication", lambda **kw: kw["graph"])
+    graph = Graph(entities={"Ana"}, edges=set(), relations=set())
+
+    kg.deduplicate(graph, temperature=0.0)
+
+    assert [c["temperature"] for c in calls] == [0.0]
+
+
+# --------------------------------------------------------------------------
+# Deduplication method validation
+# --------------------------------------------------------------------------
+
+
+def test_unknown_dedup_method_is_rejected_up_front():
+    """It used to reach `return deduplicated_graph` unassigned
+    (UnboundLocalError) or hide behind "No retrieval model provided"."""
+    graph = Graph(entities={"Ana"}, edges=set(), relations=set())
+
+    with pytest.raises(ValueError, match="bogus"):
+        run_deduplication(None, graph, method="bogus", retrieval_model=object())
+
+
+def test_dedup_method_accepts_its_string_value(monkeypatch):
+    seen = {}
+
+    def fake_semhash(graph, threshold, language, semhash_model_name):
+        seen["called"] = True
+        return graph
+
+    monkeypatch.setattr(
+        "src.kg_gen.steps._3_deduplicate.run_semhash_deduplication", fake_semhash
+    )
+    graph = Graph(entities={"Ana"}, edges=set(), relations=set())
+
+    run_deduplication(None, graph, method="semhash")
+
+    assert seen == {"called": True}
+    assert DeduplicateMethod("semhash") is DeduplicateMethod.SEMHASH
+
+

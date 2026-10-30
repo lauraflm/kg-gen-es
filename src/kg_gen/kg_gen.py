@@ -165,7 +165,7 @@ class KGGen:
 
     @staticmethod
     def from_file(file_path: str) -> Graph:
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             graph = Graph(**json.load(f))
         return graph
 
@@ -238,10 +238,14 @@ class KGGen:
             processed_input = input_data
 
         # Reinitialize dspy with new parameters if any are provided
-        if any([model, temperature, api_key, api_base, reasoning_effort]):
+        # `temperature` is compared with None: 0.0 is a valid override, but it
+        # is falsy, so `any([...])` skipped it and `or` replaced it.
+        if temperature is not None or any([model, api_key, api_base, reasoning_effort]):
             self.init_model(
                 model=model or self.model,
-                temperature=temperature or self.temperature,
+                temperature=temperature
+                if temperature is not None
+                else self.temperature,
                 api_key=api_key or self.api_key,
                 api_base=api_base or self.api_base,
                 reasoning_effort=reasoning_effort or self.reasoning_effort,
@@ -361,10 +365,12 @@ class KGGen:
         _semhash_model_name = semhash_model_name or self.semhash_model_name
 
         # Reinitialize dspy with new parameters if any are provided
-        if any([model, temperature, api_key, api_base]):
+        if temperature is not None or any([model, api_key, api_base]):
             self.init_model(
                 model=model or self.model,
-                temperature=temperature or self.temperature,
+                temperature=temperature
+                if temperature is not None
+                else self.temperature,
                 api_key=api_key or self.api_key,
                 api_base=api_base or self.api_base,
             )
@@ -510,7 +516,8 @@ class KGGen:
 
     @staticmethod
     def export_graph(graph: Graph, output_path: str):
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        # `dirname` of a bare filename is "", which `makedirs` rejects.
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         graph_dict = {
             "entities": list(graph.entities),
             "relations": list(graph.relations),
@@ -532,7 +539,7 @@ class KGGen:
             else None,
         }
 
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(graph_dict, f, indent=2)
 
     # ====== Token Usage ======

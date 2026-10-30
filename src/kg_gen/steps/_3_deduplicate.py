@@ -25,6 +25,17 @@ def run_deduplication(
     language: str = "en",
     semhash_model_name: Optional[str] = None,
 ) -> Graph:
+    # Fail on the public boundary: an unknown value used to fall through the
+    # branches below and end in an UnboundLocalError, or be masked by the
+    # retrieval-model check. The string values ("semhash", ...) are accepted.
+    try:
+        method = DeduplicateMethod(method)
+    except ValueError:
+        raise ValueError(
+            f"Unsupported deduplication method {method!r}; expected one of "
+            f"{[m.value for m in DeduplicateMethod]}"
+        ) from None
+
     if method != DeduplicateMethod.SEMHASH and retrieval_model is None:
         raise ValueError("No retrieval model provided")
 
