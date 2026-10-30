@@ -290,6 +290,40 @@ Bugs are treated differently from algorithm changes: the alias bookkeeping
 fixes in `deduplicate_cluster` and `_merge_clusters` apply to every language,
 so no configuration benefits from them over another.
 
+#### Frozen at v1.1: robustness fixes, and what is left as upstream
+v1.1 adds only fixes for code that crashed or silently lost data, each one
+shared by every language and covered by `tests/test_robustness.py`. None of
+them changes which triples are extracted when a run goes well:
+
+- An empty entity or predicate list no longer crashes SemHash or LLM dedup
+  (`IndexError`, `ZeroDivisionError`), and `no_dspy=True` with no entities
+  returns an empty extraction instead of failing on `Literal[()]`.
+- A cluster whose LLM call raises is kept unmerged. It used to be dropped
+  while the relations that mention its entities stayed in the graph.
+- Relations are remapped by original name. With `A -> B` and `B -> C`, the
+  original `B` now follows to `C` instead of staying on A's representative.
+- Prompt files and graph JSON are read and written as UTF-8 regardless of the
+  platform default; `export_graph` accepts a bare filename.
+- `temperature=0.0` as a per-call override is applied (`0.0` is falsy).
+- An unknown `DeduplicateMethod` raises `ValueError` up front.
+- An entity named `{input_data}` is no longer replaced by the source text in
+  the `no_dspy=True` relations prompt.
+- `visualize()` escapes labels, so a label cannot close the data `<script>`
+  or inject markup.
+
+Left as upstream on purpose, because changing it alters the output in every
+language and so belongs to an experimental branch:
+
+- **Dangling relations on the default (DSPy) path.** `get_relations` can
+  return a triple whose subject or object is not in the entity list; only the
+  fallback and the `no_dspy=True` paths filter them. The graph then holds
+  nodes that are only relation endpoints, and no dedup step can merge them.
+  Filtering would drop triples and closing the graph would add nodes, so
+  neither is done here. `ExtractionStats` counts them
+  (`endpoint_missing_either`).
+- `context` is accepted by `generate()` but never forwarded to the extractors.
+- Chunking, JSON parsing leniency and retry classification are unchanged.
+
 #### Requirements and fallback behavior
 Non-English `language` values require a spaCy model for lemmatization (Spanish uses `es_core_news_md`). Install it separately, since spaCy models aren't installed as regular pip dependencies:
 ```bash
