@@ -186,23 +186,6 @@ def test_spanish_prompt_files_are_read_as_utf8(cp1252_default, load):
     assert any(ch in prompt for ch in "áéíóúñ")
 
 
-# --------------------------------------------------------------------------
-# Prompt placeholders inside entity names
-# --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("language", ["en", "es"])
-def test_entity_named_like_a_placeholder_is_not_replaced_by_the_text(language):
-    """Two successive `.replace` calls: the entity list was substituted first,
-    so a literal `{input_data}` entity was then replaced with the source text."""
-    prompt = relations_step._build_relations_user_prompt(
-        language, ["{input_data}", "Ana"], "TEXTO {entities_str} fuente"
-    )
-
-    assert "- {input_data}\n- Ana" in prompt
-    assert "TEXTO {entities_str} fuente" in prompt
-
-
 def test_from_file_reads_utf8(cp1252_default, tmp_path):
     path = tmp_path / "grafo.json"
     path.write_text(
@@ -329,3 +312,44 @@ def test_dedup_method_accepts_its_string_value(monkeypatch):
     assert DeduplicateMethod("semhash") is DeduplicateMethod.SEMHASH
 
 
+# --------------------------------------------------------------------------
+# Prompt placeholders inside entity names
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("language", ["en", "es"])
+def test_entity_named_like_a_placeholder_is_not_replaced_by_the_text(language):
+    """Two successive `.replace` calls: the entity list was substituted first,
+    so a literal `{input_data}` entity was then replaced with the source text."""
+    prompt = relations_step._build_relations_user_prompt(
+        language, ["{input_data}", "Ana"], "TEXTO {entities_str} fuente"
+    )
+
+    assert "- {input_data}\n- Ana" in prompt
+    assert "TEXTO {entities_str} fuente" in prompt
+
+
+# --------------------------------------------------------------------------
+# Visualization: labels are data, not markup
+# --------------------------------------------------------------------------
+
+PAYLOAD = "</script><script id=proof>void 0</script>"
+
+
+def test_visualize_does_not_let_a_label_close_the_data_script(tmp_path):
+    graph = Graph(
+        entities={PAYLOAD, "Ana"},
+        edges={"conoce a"},
+        relations={(PAYLOAD, "conoce a", "Ana")},
+    )
+
+    html = visualize(graph, str(tmp_path / "g.html")).read_text(encoding="utf-8")
+
+    assert "<script id=proof>" not in html
+    assert "</script><script" not in html
+
+
+def test_template_escapes_labels_before_innerhtml():
+    # Every dynamic fragment goes through `safeHTML`, so no template literal
+    # that is assigned to innerHTML interpolates a raw value.
+    assert "function safeHTML" in HTML_TEMPLATE

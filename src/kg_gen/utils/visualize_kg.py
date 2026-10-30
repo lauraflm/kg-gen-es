@@ -284,7 +284,10 @@ def visualize(
     view_model = _build_view_model(graph)
     html = HTML_TEMPLATE.replace(
         "<!--DATA-->",
-        json.dumps(view_model, ensure_ascii=False, indent=2),
+        json.dumps(view_model, ensure_ascii=False, indent=2)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e"),
     )
 
     # Make sidebar visible for standalone mode by removing display: none

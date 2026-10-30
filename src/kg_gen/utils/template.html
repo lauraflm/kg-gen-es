@@ -540,6 +540,13 @@
                 });
             });
 
+            function safeHTML(strings, ...values) {
+                const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+                const escape = value => String(value).replace(/[&<>"']/g, char => entities[char]);
+                return strings.reduce((result, literal, index) =>
+                    result + literal + (index < values.length ? escape(values[index]) : ''), '');
+            }
+
             function renderStats() {
                 const grid = document.getElementById('statsGrid');
                 const stats = vizData.stats;
@@ -554,7 +561,7 @@
                     { label: 'Average degree', value: stats.averageDegree }
                 ];
                 grid.innerHTML = entries
-                    .map(entry => `
+                    .map(entry => safeHTML`
                         <div class="stat-card">
                             <div class="stat-value">${entry.value}</div>
                             <div>${entry.label}</div>
@@ -569,7 +576,7 @@
 
                 const entityItems = vizData.topEntities.map(item => {
                     const clusterLabel = item.cluster ? `${item.cluster}` : 'Unclustered';
-                    return `
+                    return safeHTML`
                         <div class="list-item">
                             <div>
                                 <strong>${item.label}</strong>
@@ -581,7 +588,7 @@
                 });
                 topEntitiesContainer.innerHTML = entityItems.join('') || '<div class="meta">No entities</div>';
 
-                const relationItems = vizData.topRelations.map(item => `
+                const relationItems = vizData.topRelations.map(item => safeHTML`
                     <div class="list-item relation-item" data-predicate="${item.predicate}">
                         <div>
                             <strong>${item.predicate}</strong>
@@ -600,7 +607,7 @@
                     return;
                 }
                 container.innerHTML = vizData.clusters
-                    .map(cluster => `
+                    .map(cluster => safeHTML`
                         <button class="list-item cluster-item" data-cluster="${cluster.id}" style="border-left-color: ${cluster.color};">
                             <div>
                                 <strong>${cluster.label}</strong>
@@ -733,7 +740,7 @@
                     const node = nodeById[active.id];
                     const cluster = node.cluster ? `Cluster: ${node.cluster}` : 'Unclustered';
                     const neighbors = node.neighbors.length ? node.neighbors.join(', ') : 'None';
-                    panel.innerHTML = `
+                    panel.innerHTML = safeHTML`
                         <h3>${node.label}</h3>
                         <ul>
                             <li>${cluster}</li>
@@ -746,7 +753,7 @@
                 } else if (active.type === 'edge') {
                     const edge = edgeById[active.id];
                     const cluster = edge.cluster ? `Cluster: ${edge.cluster}` : 'Unclustered';
-                    panel.innerHTML = `
+                    panel.innerHTML = safeHTML`
                         <h3>${edge.source} → ${edge.target}</h3>
                         <ul>
                             <li>Relation: ${edge.predicate}</li>
