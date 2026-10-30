@@ -64,6 +64,21 @@ def test_llm_dedup_accepts_a_graph_with_an_empty_component(monkeypatch, graph):
     assert result.relations == graph.relations
 
 
+def test_litellm_relations_with_no_entities_make_no_call(monkeypatch):
+    """`Literal[()]` is an AssertionError; an empty list is a valid extraction."""
+
+    def refuse(**kwargs):
+        raise AssertionError("no LLM call expected for an empty entity list")
+
+    monkeypatch.setattr(relations_step.litellm, "responses", refuse)
+
+    result = relations_step._get_relations_litellm(
+        "Un texto.", [], model="openai/fake-model"
+    )
+
+    assert result == []
+
+
 # --------------------------------------------------------------------------
 # A failing LLM call must not delete the cluster
 # --------------------------------------------------------------------------
@@ -132,5 +147,59 @@ def test_relation_follows_original_name_not_alias_with_same_spelling(monkeypatch
     assert result.entities == {"B", "C"}
     assert result.entity_clusters == {"B": {"A"}, "C": {"B", "C"}}
     assert result.relations == {("C", "p", "C"), ("B", "p", "C")}
+
+
+# --------------------------------------------------------------------------
+# Explicit UTF-8
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cp1252_default(monkeypatch):
+    """Make every text read/write that omits `encoding` use cp1252, as a
+    Windows or `LANG=C` machine would."""
+    real_open = builtins.open
+    real_read_text = Path.read_text
+
+    def fake_open(file, mode="r", buffering=-1, encoding=None, *args, **kwargs):
+        if "b" not in mode and encoding is None:
+            encoding = "cp1252"
+        return real_open(file, mode, buffering, encoding, *args, **kwargs)
+
+    def fake_read_text(self, encoding=None, errors=None):
+        return real_read_text(self, encoding=encoding or "cp1252", errors=errors)
+
+    monkeypatch.setattr(kg_gen_module, "open", fake_open, raising=False)
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+
+@pytest.mark.parametrize(
+    "load",
+    [entities_step._load_entities_prompt, relations_step._load_relations_prompt],
+    ids=["entities", "relations"],
+)
+def test_spanish_prompt_files_are_read_as_utf8(cp1252_default, load):
+    """"Extraerás" became "ExtraerÃ¡s" before reaching the model."""
+    prompt = load("es")
+
+    assert "Ã" not in prompt
+    assert any(ch in prompt for ch in "áéíóúñ")
+
+
+# --------------------------------------------------------------------------
+# Prompt placeholders inside entity names
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("language", ["en", "es"])
+def test_entity_named_like_a_placeholder_is_not_replaced_by_the_text(language):
+    """Two successive `.replace` calls: the entity list was substituted first,
+    so a literal `{input_data}` entity was then replaced with the source text."""
+    prompt = relations_step._build_relations_user_prompt(
+        language, ["{input_data}", "Ana"], "TEXTO {entities_str} fuente"
+    )
+
+    assert "- {input_data}\n- Ana" in prompt
+    assert "TEXTO {entities_str} fuente" in prompt
 
 

@@ -91,7 +91,7 @@ def _load_entities_prompt(language: str = "en") -> str:
     """Load the entities prompt template from file."""
     filename = _pick(_ENTITIES_PROMPT_FILES, language)
     prompt_path = Path(__file__).parent.parent / "prompts" / filename
-    return prompt_path.read_text()
+    return prompt_path.read_text(encoding="utf-8")
 
 
 def _get_entities_litellm(

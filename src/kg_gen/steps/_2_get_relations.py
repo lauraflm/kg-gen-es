@@ -2,6 +2,7 @@ from functools import lru_cache
 from typing import List, Tuple, Optional, Literal, Type
 from pathlib import Path
 import json
+import re
 import dspy
 import litellm
 from pydantic import BaseModel, create_model, ValidationError
@@ -247,7 +248,29 @@ def _load_relations_prompt(language: str = "en") -> str:
     """Load the relations prompt template from file."""
     filename = _pick(_RELATIONS_PROMPT_FILES, language)
     prompt_path = Path(__file__).parent.parent / "prompts" / filename
-    return prompt_path.read_text()
+    return prompt_path.read_text(encoding="utf-8")
+
+
+def _build_relations_user_prompt(
+    language: str, entities: List[str], input_data: str
+) -> str:
+    """Fill the user prompt in a single pass over the template.
+
+    Successive `.replace` calls re-scan text that was just inserted: an entity
+    literally named `{input_data}` was swapped for the source text by the
+    second call. `.format` would be safe against that, but the template is
+    not required to escape braces, so a single regex pass over the two known
+    placeholders is used instead.
+    """
+    values = {
+        "entities_str": "\n".join(f"- {e}" for e in entities),
+        "input_data": input_data,
+    }
+    return re.sub(
+        r"\{(entities_str|input_data)\}",
+        lambda match: values[match.group(1)],
+        _pick(_RELATIONS_USER_PROMPT, language),
+    )
 
 
 def _create_relations_model(entities: List[str]):
@@ -282,13 +305,13 @@ def _get_relations_litellm(
     language: str = "en",
     stats: Optional[ExtractionStats] = None,
 ) -> List[Tuple[str, str, str]]:
+    # `Literal[()]` cannot be built, and with no entities there is nothing
+    # the model could relate: an empty extraction is a valid result.
+    if not entities:
+        return []
+
     prompt_template = _load_relations_prompt(language)
-    entities_str = "\n".join(f"- {e}" for e in entities)
-    user_prompt = (
-        _pick(_RELATIONS_USER_PROMPT, language)
-        .replace("{entities_str}", entities_str)
-        .replace("{input_data}", input_data)
-    )
+    user_prompt = _build_relations_user_prompt(language, entities, input_data)
 
     # Create dynamic model with entity constraints
     _, RelationsResponse = _create_relations_model(entities)
