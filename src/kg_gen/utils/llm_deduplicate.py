@@ -379,6 +379,20 @@ class LLMDeduplicate:
         return items, item_clusters
 
     @staticmethod
+    def _unmerged(cluster: list[str]) -> tuple[set, dict[str, set[str]]]:
+        """The result of a cluster in which nothing was merged."""
+        return set(cluster), {item: {item} for item in cluster}
+
+    @staticmethod
+    def _representatives(clusters: dict[str, set[str]]) -> dict[str, str]:
+        """Map each original name to the representative that replaces it."""
+        representatives: dict[str, str] = {}
+        for rep, members in clusters.items():
+            for member in members:
+                representatives.setdefault(member, rep)
+        return representatives
+
+    @staticmethod
     def _merge_clusters(
         target: dict[str, set[str]], source: dict[str, set[str]]
     ) -> None:
@@ -406,32 +420,46 @@ class LLMDeduplicate:
         cnt_nodes = 0
         for i, cluster in enumerate(self.node_clusters):
             cnt_nodes += len(cluster)
-            node_futures.append(pool.submit(self.deduplicate_cluster, cluster, "node"))
+            node_futures.append(
+                (cluster, pool.submit(self.deduplicate_cluster, cluster, "node"))
+            )
 
         # Process edge clusters in parallel
         edge_futures = []
         cnt_edges = 0
         for i, cluster in enumerate(self.edge_clusters):
             cnt_edges += len(cluster)
-            edge_futures.append(pool.submit(self.deduplicate_cluster, cluster, "edge"))
+            edge_futures.append(
+                (cluster, pool.submit(self.deduplicate_cluster, cluster, "edge"))
+            )
 
         # Collect results from node futures
-        for i, future in enumerate(node_futures):
+        for i, (cluster, future) in enumerate(node_futures):
             try:
                 cluster_entities, cluster_entity_map = future.result()
-                entities.update(cluster_entities)
-                self._merge_clusters(entity_clusters, cluster_entity_map)
             except Exception as e:
-                self.logger.error("Error processing node cluster %s: %s", i, e)
+                # Keep the cluster as it was. Dropping it removed its entities
+                # while the relations that mention them stayed in the graph.
+                self.logger.error(
+                    "Error processing node cluster %s, keeping it unmerged: %s", i, e
+                )
+                cluster_entities, cluster_entity_map = self._unmerged(cluster)
+            entities.update(cluster_entities)
+            self._merge_clusters(entity_clusters, cluster_entity_map)
 
         # Collect results from edge futures
-        for i, future in enumerate(edge_futures):
+        for i, (cluster, future) in enumerate(edge_futures):
             try:
                 cluster_edges, cluster_edge_map = future.result()
-                edges.update(cluster_edges)
-                self._merge_clusters(edge_clusters, cluster_edge_map)
             except Exception as e:
-                self.logger.error("Error processing edge cluster %s: %s", i, e)
+                self.logger.error(
+                    "Error processing edge cluster %s, keeping it unmerged: %s", i, e
+                )
+                cluster_edges, cluster_edge_map = self._unmerged(cluster)
+            edges.update(cluster_edges)
+            self._merge_clusters(edge_clusters, cluster_edge_map)
+
+        pool.shutdown()
 
         self.logger.info(
             "Finished processing all clusters with %s nodes and %s edges LLM calls",
@@ -439,32 +467,24 @@ class LLMDeduplicate:
             cnt_edges,
         )
 
-        # Update relations based on clusters
+        # Update relations based on clusters.
+        #
+        # Look each name up by membership alone. An earlier `if s not in
+        # entities` guard skipped the lookup whenever the original name was
+        # also the final name of some cluster, but that only means the
+        # spelling is taken: with A -> B and B -> C the original B has to move
+        # to C, and the guard left it pointing at A's representative. An
+        # original that is its own representative is a member of its own
+        # cluster, so the lookup returns the same name.
+        entity_rep = self._representatives(entity_clusters)
+        edge_rep = self._representatives(edge_clusters)
+
         relations: set[tuple[str, str, str]] = set()
 
         for s, p, o in self.graph.relations:
-            # Look up subject in entity clusters
-            if s not in entities:
-                for rep, cluster in entity_clusters.items():
-                    if s in cluster:
-                        s = rep
-                        break
-
-            # Look up predicate in edge clusters
-            if p not in edges:
-                for rep, cluster in edge_clusters.items():
-                    if p in cluster:
-                        p = rep
-                        break
-
-            # Look up object in entity clusters
-            if o not in entities:
-                for rep, cluster in entity_clusters.items():
-                    if o in cluster:
-                        o = rep
-                        break
-
-            relations.add((s, p, o))
+            relations.add(
+                (entity_rep.get(s, s), edge_rep.get(p, p), entity_rep.get(o, o))
+            )
 
         # Update entity_metadata keys to match deduplicated entity names
         new_entity_metadata: dict[str, set[str]] | None = None

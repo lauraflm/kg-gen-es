@@ -64,3 +64,73 @@ def test_llm_dedup_accepts_a_graph_with_an_empty_component(monkeypatch, graph):
     assert result.relations == graph.relations
 
 
+# --------------------------------------------------------------------------
+# A failing LLM call must not delete the cluster
+# --------------------------------------------------------------------------
+
+
+class _FailingOn(ScriptedPredict):
+    """ScriptedPredict that raises when asked about any item in `bad`."""
+
+    def __init__(self, script, bad):
+        super().__init__(script)
+        self.bad = set(bad)
+
+    def _predict(self, item, set):
+        if item in self.bad:
+            raise RuntimeError("provider unavailable")
+        return super()._predict(item, set)
+
+
+def test_failed_cluster_is_kept_unmerged(monkeypatch):
+    """The exception was only logged, so the cluster's entities vanished
+    while the relations that mention them stayed in the graph."""
+    graph = Graph(
+        entities={"oruga", "larva", "mariposa"},
+        edges={"se convierte en"},
+        relations={("oruga", "se convierte en", "mariposa")},
+    )
+    predictor = _FailingOn({}, bad={"oruga", "larva"})
+    monkeypatch.setattr(llm_dedup_module.dspy, "Predict", lambda signature: predictor._predict)
+    deduper = LLMDeduplicate(
+        retrieval_model=FakeEncoder(), lm=None, graph=graph, language="es"
+    )
+    deduper.node_clusters = [["oruga", "larva"], ["mariposa"]]
+    deduper.edge_clusters = [["se convierte en"]]
+
+    result = deduper.deduplicate()
+
+    assert result.entities == {"oruga", "larva", "mariposa"}
+    assert result.edges == {"se convierte en"}
+    assert result.relations == {("oruga", "se convierte en", "mariposa")}
+
+
+# --------------------------------------------------------------------------
+# Relations of an original name that is also another item's alias
+# --------------------------------------------------------------------------
+
+
+def test_relation_follows_original_name_not_alias_with_same_spelling(monkeypatch):
+    """A is merged into B while the original B is merged into C.
+
+    Entities end up {B, C}. The relation on the original B must go to C, but
+    the old `if s not in entities` guard saw "B" in the entities and left it,
+    so the relation silently pointed at A's representative instead.
+    """
+    graph = Graph(
+        entities={"A", "B", "C"},
+        edges={"p"},
+        relations={("B", "p", "C"), ("A", "p", "C")},
+    )
+    script = {"A": ("B", []), "B": ("C", [])}
+    deduper, _ = build(graph, script, monkeypatch=monkeypatch)
+    deduper.node_clusters = [["C", "B", "A"]]  # pop() takes A, then B, then C
+    deduper.edge_clusters = [["p"]]
+
+    result = deduper.deduplicate()
+
+    assert result.entities == {"B", "C"}
+    assert result.entity_clusters == {"B": {"A"}, "C": {"B", "C"}}
+    assert result.relations == {("C", "p", "C"), ("B", "p", "C")}
+
+
