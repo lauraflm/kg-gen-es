@@ -27,7 +27,9 @@ from src.kg_gen.steps._2_get_relations import (
     fallback_extraction_sig,
 )
 from src.kg_gen.utils.i18n import LINGUISTIC_PROFILES, validate_linguistic_profile
-from tests.prompt_capture import capture_calls, capture_prompts, render
+# By module name, like `fixtures`: a bare `pytest` also collects mcp/tests, a
+# package that takes the name `tests`.
+from prompt_capture import capture_calls, capture_prompts, render
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPTS = ROOT / "src" / "kg_gen" / "prompts"

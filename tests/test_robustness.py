@@ -25,7 +25,9 @@ from src.kg_gen.utils.deduplicate import DeduplicateList
 from src.kg_gen.utils.llm_deduplicate import LLMDeduplicate
 from src.kg_gen.utils.visualize_kg import HTML_TEMPLATE, visualize
 
-from tests.test_llm_deduplicate import FakeEncoder, ScriptedPredict, build
+# By module name, like `fixtures`: a bare `pytest` also collects mcp/tests, a
+# package that takes the name `tests`.
+from test_llm_deduplicate import FakeEncoder, ScriptedPredict, build
 
 # --------------------------------------------------------------------------
 # Empty inputs
