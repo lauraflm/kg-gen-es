@@ -107,3 +107,14 @@ def add_profile_rules(prompt: str, rules: str) -> str:
     for it to remove.
     """
     return f"{inspect.cleandoc(prompt)}\n\n{rules}"
+
+
+def add_context(prompt: str, context: str) -> str:
+    """Append the caller's `context` after a signature's instructions.
+
+    A space separates them, as in upstream's relation signatures. The prompt
+    goes through `inspect.cleandoc` first for the reason add_profile_rules
+    gives: a context with unindented lines would stop DSPy from dedenting
+    the instructions above it.
+    """
+    return f"{inspect.cleandoc(prompt)} {context}"

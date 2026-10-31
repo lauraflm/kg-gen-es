@@ -6,8 +6,8 @@ recorders, and renders each recorded DSPy call with the ChatAdapter, the way
 DSPy sends it. It covers every route: DSPy on text and on a conversation, the
 DSPy fallback with its fix step, and the litellm route.
 
-With `linguistic_profile=None` it only passes arguments that v1.1 already
-had, so the same file regenerates the v1.1 snapshot from a checkout of the
+With `linguistic_profile` and `context` left as None it only passes arguments
+that v1.1 already had, so the same file regenerates the v1.1 snapshot from a checkout of the
 tag (needed only if DSPy is upgraded and changes how it renders prompts):
 
     git worktree add ../kg-gen-es-v1.1 v1.1
@@ -114,9 +114,11 @@ def render(call):
     }
 
 
-def capture_calls(language, linguistic_profile=None):
+def capture_calls(language, linguistic_profile=None, context=None):
     """The raw recorded calls of every scenario: (kind, signature, inputs)."""
     extra = {} if linguistic_profile is None else {"linguistic_profile": linguistic_profile}
+    if context is not None:
+        extra["context"] = context
     captured = {}
     for name, scenario in SCENARIOS.items():
         calls = []

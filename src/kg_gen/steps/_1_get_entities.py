@@ -5,7 +5,7 @@ import dspy
 import litellm
 from pydantic import BaseModel
 
-from kg_gen.utils.i18n import add_profile_rules, pick as _pick
+from kg_gen.utils.i18n import add_context, add_profile_rules, pick as _pick
 
 _TEXT_ENTITIES_INSTRUCTIONS = {
     "en": """Extract key entities from the source text. Extracted entities are subjects or objects.
@@ -59,14 +59,17 @@ Este es el texto del que debes extraer entidades:
 }
 
 
-# Cached: the class depends only on these two arguments, and get_entities
-# would otherwise rebuild it for every chunk. Sharing it across threads is
-# safe, since dspy derives new signature classes rather than mutating them.
-@lru_cache(maxsize=None)
+# Cached: the class depends only on its arguments, and get_entities would
+# otherwise rebuild it for every chunk. Sharing it across threads is safe,
+# since dspy derives new signature classes rather than mutating them.
+# Bounded rather than unbounded because `context` is free text from the
+# caller, as in extraction_sig.
+@lru_cache(maxsize=128)
 def _entities_sig(
     is_conversation: bool,
     language: str = "en",
     linguistic_profile: Optional[str] = None,
+    context: str = "",
 ) -> dspy.Signature:
     """Build the entity-extraction signature for the requested language.
 
@@ -80,6 +83,9 @@ def _entities_sig(
         else _TEXT_ENTITIES_INSTRUCTIONS,
         language,
     )
+    # Before the profile rules, where extraction_sig puts it for relations.
+    if context:
+        instructions = add_context(instructions, context)
     if linguistic_profile is not None:
         instructions = add_profile_rules(
             instructions,
@@ -128,8 +134,11 @@ def _get_entities_litellm(
     temperature: float = 0.0,
     language: str = "en",
     linguistic_profile: Optional[str] = None,
+    context: str = "",
 ) -> List[str]:
     prompt_template = _load_entities_prompt(language, linguistic_profile)
+    if context:
+        prompt_template = f"{prompt_template.rstrip()}\n\n{context}"
     user_prompt = _pick(_ENTITIES_USER_PROMPT, language).replace(
         "{input_data}", input_data
     )
@@ -176,6 +185,7 @@ def get_entities(
     temperature: float = 0.0,
     language: str = "en",
     linguistic_profile: Optional[str] = None,
+    context: str = "",
 ) -> List[str]:
     if use_litellm_prompt and not is_conversation:
         return _get_entities_litellm(
@@ -186,9 +196,12 @@ def get_entities(
             temperature=temperature,
             language=language,
             linguistic_profile=linguistic_profile,
+            context=context,
         )
 
-    EntitiesSignature = _entities_sig(is_conversation, language, linguistic_profile)
+    EntitiesSignature = _entities_sig(
+        is_conversation, language, linguistic_profile, context
+    )
     extract = dspy.Predict(EntitiesSignature)
     result = extract(source_text=input_data)
     return result.entities

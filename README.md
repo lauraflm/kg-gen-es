@@ -489,6 +489,28 @@ An unsupported `language` code raises `ValueError`, and a supported one whose sp
 4. Optionally add `prompts/<entities>.txt` and `prompts/<relations>.txt` for the `no_dspy=True` path.
 5. Add the code to `SUPPORTED_LANGUAGES` in [`utils/i18n.py`](src/kg_gen/utils/i18n.py). Do this last: it is what makes the code accepted at all, so registering it before the steps above turns a clear "unsupported language" error into silent English fallbacks.
 
+### Experimental flags (`exp/core-extraction`)
+This branch tries changes to the extraction algorithm itself, in every
+language. Each one sits behind a flag that is off by default, and with every
+flag off the prompts are v1.1's: the snapshot test in
+`tests/test_linguistic_profile.py` keeps checking that.
+
+#### `forward_context`
+Upstream kg-gen accepts `context` in `generate()` but never shows it to the
+extractors (see [Frozen at v1.1](#frozen-at-v11-robustness-fixes-and-what-is-left-as-upstream)).
+With `forward_context=True`, at init or per call, it is appended as written to
+the entity and relation prompts on every route: after the instructions, with
+a space, on the DSPy path, which is what upstream's relation signatures were
+already built to do; after the system prompt on the `no_dspy=True` path. It
+goes before the rules of a linguistic profile. Since nothing introduces it,
+write it as a sentence. The fallback's fix step and deduplication still ignore
+it.
+
+```python
+kg = KGGen(language="es", forward_context=True)
+graph = kg.generate(text, context="El texto es un ensayo escolar sobre los dinosaurios.")
+```
+
 ### Aggregating Multiple Graphs
 You can combine multiple graphs using the aggregate method:
 ```python

@@ -8,7 +8,7 @@ import litellm
 from pydantic import BaseModel, create_model, ValidationError
 
 from kg_gen.utils.extraction_stats import ExtractionStats
-from kg_gen.utils.i18n import add_profile_rules, pick as _pick
+from kg_gen.utils.i18n import add_context, add_profile_rules, pick as _pick
 
 
 def parse_relations_response(
@@ -341,6 +341,7 @@ def _get_relations_litellm(
     language: str = "en",
     stats: Optional[ExtractionStats] = None,
     linguistic_profile: Optional[str] = None,
+    context: str = "",
 ) -> List[Tuple[str, str, str]]:
     # `Literal[()]` cannot be built, and with no entities there is nothing
     # the model could relate: an empty extraction is a valid result.
@@ -348,6 +349,8 @@ def _get_relations_litellm(
         return []
 
     prompt_template = _load_relations_prompt(language, linguistic_profile)
+    if context:
+        prompt_template = f"{prompt_template.rstrip()}\n\n{context}"
     user_prompt = _build_relations_user_prompt(language, entities, input_data)
 
     # Create dynamic model with entity constraints
@@ -389,15 +392,11 @@ def _get_relations_litellm(
     return parse_relations_response(raw_json, entities, RelationsResponse, stats=stats)
 
 
-# Cached for the same reason as _relation_model; the key includes the
-# Relation class itself, which is hashable by identity and, from
-# get_relations, the cached one. Bounded rather than unbounded because
-# `context` is free text from the caller. The fallback bypasses this cache
-# too, since its Relation class is new for every chunk.
 def _relations_doc(
     instructions: str, context: str, linguistic_profile: Optional[str]
 ) -> str:
-    doc = f"{instructions} {context}"
+    # Without a context this is v1.1's exact string, trailing space included.
+    doc = add_context(instructions, context) if context else f"{instructions} "
     if linguistic_profile is None:
         return doc
     return add_profile_rules(
@@ -405,6 +404,11 @@ def _relations_doc(
     )
 
 
+# Cached for the same reason as _relation_model; the key includes the
+# Relation class itself, which is hashable by identity and, from
+# get_relations, the cached one. Bounded rather than unbounded because
+# `context` is free text from the caller. The fallback bypasses this cache
+# too, since its Relation class is new for every chunk.
 @lru_cache(maxsize=128)
 def extraction_sig(
     Relation: BaseModel,
@@ -501,6 +505,7 @@ def get_relations(
             language=language,
             stats=stats,
             linguistic_profile=linguistic_profile,
+            context=context,
         )
 
     if stats is not None:

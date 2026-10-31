@@ -44,6 +44,8 @@ class KGGen:
         linguistic_profile: Optional[str] = None,
         keep_negation_apart: bool = False,
         keep_factuality_apart: bool = True,
+        # ---- Experimental (exp/core-extraction), off by default ----
+        forward_context: bool = False,
     ):
         """Initialize KGGen with optional model configuration
 
@@ -69,6 +71,9 @@ class KGGen:
                 plan or a possibility ("fundó" / "fundará") in a language
                 whose predicate keys lemmatize verbs (all but English), since
                 lemmatizing is what joins them. False reproduces v1.1's dedup.
+            forward_context: Append generate()'s `context` to the entity and
+                relation extraction prompts. If False, extraction ignores
+                `context`, as upstream kg-gen does.
         """
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -86,6 +91,7 @@ class KGGen:
         )
         self.keep_negation_apart = keep_negation_apart
         self.keep_factuality_apart = keep_factuality_apart
+        self.forward_context = forward_context
 
         self.init_model(
             model=model,
@@ -227,6 +233,7 @@ class KGGen:
         linguistic_profile: Optional[str] = None,
         keep_negation_apart: Optional[bool] = None,
         keep_factuality_apart: Optional[bool] = None,
+        forward_context: Optional[bool] = None,
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -235,7 +242,8 @@ class KGGen:
             model: Name of OpenAI model to use
             api_key (str): OpenAI API key for making model calls
             chunk_size: Max size of text chunks in characters to process
-            context: Description of data context
+            context: Description of data context. It reaches the extraction
+                prompts only with `forward_context`; deduplication ignores it
             output_folder: Path to save partial progress
             language: Override instance language for this call
             semhash_model_name: Override instance semhash model for this call
@@ -250,6 +258,7 @@ class KGGen:
                 deduplication
             keep_factuality_apart: Override the instance value for this
                 call's deduplication
+            forward_context: Override instance forward_context for this call
 
         Returns:
             Graph: Generated knowledge graph
@@ -261,6 +270,9 @@ class KGGen:
         _linguistic_profile = self._resolve_linguistic_profile(
             linguistic_profile, _language
         )
+        if forward_context is None:
+            forward_context = self.forward_context
+        _extraction_context = context if forward_context else ""
 
         # Process input data
         is_conversation = isinstance(input_data, list)
@@ -319,6 +331,7 @@ class KGGen:
                     else self.temperature,
                     language=_language,
                     linguistic_profile=_linguistic_profile,
+                    context=_extraction_context,
                 )
                 relations = get_relations(
                     content,
@@ -334,6 +347,7 @@ class KGGen:
                     language=_language,
                     stats=attempt_stats,
                     linguistic_profile=_linguistic_profile,
+                    context=_extraction_context,
                 )
                 if attempt_stats is not None:
                     attempt_stats.record_chunk(content)
