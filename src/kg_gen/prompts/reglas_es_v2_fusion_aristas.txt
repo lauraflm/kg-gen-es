@@ -1,0 +1,3 @@
+Reglas para el español:
+1. Concordancia. El género y el número con que el predicado concuerda con su sujeto no distinguen relaciones: estar casado con, estar casada con y estar casados con son duplicados, como ser fundado por y ser fundada por. Usa como alias el masculino singular.
+2. Un sustantivo con género propio sí distingue la relación: ser hermano de y ser hermana de no son duplicados.

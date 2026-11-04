@@ -27,8 +27,9 @@ DEFAULT_LANGUAGE = "en"
 
 # Optional linguistic profiles, each mapped to the one language whose prompts
 # it extends. A profile appends a block of rules to that language's default
-# prompts and leaves the rest as it is, so its effect is that block. None,
-# the default, sends the prompts unchanged.
+# prompts and leaves the rest as it is, so its effect is that block, plus
+# what SemHash dedup does to follow it (es-v2: see DeduplicateList). None,
+# the default, sends the prompts unchanged and dedups as before.
 LINGUISTIC_PROFILES = {"es-v2": "es"}
 
 

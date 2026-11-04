@@ -1,4 +1,5 @@
-from typing import List
+from pathlib import Path
+from typing import List, Optional
 from scipy.spatial.distance import cdist
 from concurrent.futures import ThreadPoolExecutor
 import dspy
@@ -10,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from sklearn.cluster import KMeans
 
-from kg_gen.utils.i18n import pick as _pick
+from kg_gen.utils.i18n import add_profile_rules, pick as _pick
 
 # Nouns used to refer to the items being deduplicated, interpolated into the
 # prompt. Keyed by item type ("node"/"edge") then (plural, singular).
@@ -61,6 +62,22 @@ _ALIAS_OUTPUT_DESC = {
     "es": "Mejor nombre de {singular} para representar a los duplicados, idealmente del conjunto de {plural}",
 }
 
+# An optional linguistic profile (see i18n.LINGUISTIC_PROFILES) appends its
+# rules to the instructions above, per item type. es-v2: gender and number
+# tell entities apart, and agreement with the subject does not tell edges
+# apart, as in the profile's SemHash keys.
+_DEDUPLICATE_PROFILE_RULES_FILES = {
+    "es-v2": {
+        "node": "reglas_es_v2_fusion_entidades.txt",
+        "edge": "reglas_es_v2_fusion_aristas.txt",
+    },
+}
+
+
+def _read_prompt(filename: str) -> str:
+    prompt_path = Path(__file__).parent.parent / "prompts" / filename
+    return prompt_path.read_text(encoding="utf-8")
+
 
 class LLMDeduplicate:
     graph: Graph
@@ -80,6 +97,7 @@ class LLMDeduplicate:
         lm: dspy.LM,
         graph: Graph,
         language: str = "en",
+        linguistic_profile: Optional[str] = None,
     ):
         """
         Initialize KG-assisted RAG with cached embeddings, BM25 tokens, and text chunk store.
@@ -89,9 +107,12 @@ class LLMDeduplicate:
                 picks the alias that becomes each entity's final name in the
                 graph, so an untranslated prompt here can rename non-English
                 entities into English.
+            linguistic_profile: Appends that profile's rules to the
+                instructions. None sends them unchanged.
         """
         self.graph = graph
         self.language = language
+        self.linguistic_profile = linguistic_profile
         self.nodes = list(graph.entities)
         self.edges = list(graph.edges)
         self.node_clusters = graph.entity_clusters or []
@@ -293,10 +314,19 @@ class LLMDeduplicate:
                     ("..." if len(relevant_items) > 3 else ""),
                 )
 
-            class Deduplicate(dspy.Signature):
-                __doc__ = _pick(_DEDUPLICATE_INSTRUCTIONS, self.language).format(
-                    plural=plural_type
+            instructions = _pick(_DEDUPLICATE_INSTRUCTIONS, self.language).format(
+                plural=plural_type
+            )
+            if self.linguistic_profile is not None:
+                instructions = add_profile_rules(
+                    instructions,
+                    _read_prompt(
+                        _DEDUPLICATE_PROFILE_RULES_FILES[self.linguistic_profile][type]
+                    ),
                 )
+
+            class Deduplicate(dspy.Signature):
+                __doc__ = instructions
 
                 item: str = dspy.InputField()
                 set: list[str] = dspy.InputField()

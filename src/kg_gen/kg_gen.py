@@ -54,10 +54,11 @@ class KGGen:
             semhash_model_name: HuggingFace model name for SemHash encoder.
                 If None, uses SemHash default (potion-base-8M).
                 For multilingual: "minishlab/potion-multilingual-128M".
-            linguistic_profile: Optional extra extraction rules for one
-                language. "es-v2" (requires language="es") appends Spanish
-                rules to the entity and relation prompts. If None, the
-                prompts are exactly the language's defaults.
+            linguistic_profile: Optional rules for one language. "es-v2"
+                (requires language="es") appends Spanish rules to the
+                entity, relation and LLM dedup prompts, and makes SemHash
+                dedup keep grammatical gender and number apart. If None,
+                prompts and dedup are exactly the language's defaults.
         """
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -229,7 +230,8 @@ class KGGen:
                 that succeed are counted, so a context-length retry is not
                 counted twice
             linguistic_profile: Override instance linguistic profile for
-                this call; it must apply to the call's language
+                this call, extraction and deduplication alike; it must apply
+                to the call's language
 
         Returns:
             Graph: Generated knowledge graph
@@ -361,6 +363,7 @@ class KGGen:
                 context=context,
                 language=_language,
                 semhash_model_name=_semhash_model_name,
+                linguistic_profile=_linguistic_profile,
             )
 
         if output_folder:
@@ -388,10 +391,14 @@ class KGGen:
         # ---- Multilingual params ----
         language: Optional[str] = None,
         semhash_model_name: Optional[str] = None,
+        linguistic_profile: Optional[str] = None,
     ) -> Graph:
         # Resolve multilingual params
         _language = self._resolve_language(language)
         _semhash_model_name = semhash_model_name or self.semhash_model_name
+        _linguistic_profile = self._resolve_linguistic_profile(
+            linguistic_profile, _language
+        )
 
         # Reinitialize dspy with new parameters if any are provided
         if temperature is not None or any([model, api_key, api_base]):
@@ -412,6 +419,7 @@ class KGGen:
             semhash_similarity_threshold=semhash_similarity_threshold,
             language=_language,
             semhash_model_name=_semhash_model_name,
+            linguistic_profile=_linguistic_profile,
         )
 
     def aggregate(self, graphs: list[Graph]) -> Graph:

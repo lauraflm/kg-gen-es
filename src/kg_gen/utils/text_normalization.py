@@ -24,6 +24,7 @@ should not be shown to users.
 import threading
 import unicodedata
 from pathlib import Path
+from typing import Optional
 
 import spacy
 
@@ -175,7 +176,7 @@ class TextNormalizer:
             text, pos_tags={"NOUN"}, strip_leading_det=True
         )
 
-    def lemmatize_predicate(self, text: str) -> str:
+    def lemmatize_predicate(self, text: str, adjectives: bool = False) -> str:
         """
         Normalize predicate/edge text to its lemma form.
 
@@ -189,14 +190,50 @@ class TextNormalizer:
           Spanish ones do, so no additional handling is needed here.
         - Other languages: uses spaCy lemmatization on NOUN, VERB, and
           AUX tokens.
+
+        `adjectives` also lemmatizes ADJ tokens. spaCy tags the participle
+        after "estar" as an adjective, so without it the subject's gender and
+        number stay in the key ("estar casado con" / "estar casada con"),
+        while the participle of a passive with "ser" is a VERB and loses
+        them. Off by default, which is v1.1's key; the es-v2 profile turns
+        it on.
         """
         if self.language == "en":
             return self._singularize_en(text)
+        pos_tags = {"NOUN", "VERB", "AUX"}
+        if adjectives:
+            pos_tags.add("ADJ")
         # Predicates are never proper nouns, but spaCy's Spanish tagger
         # mistags a capitalized leading verb as PROPN (e.g. "Fundó"),
         # which skips lemmatization. Lowercasing first avoids that, and
         # is safe here since predicate casing carries no meaning.
-        return self._lemmatize_spacy(text.lower(), pos_tags={"NOUN", "VERB", "AUX"})
+        return self._lemmatize_spacy(text.lower(), pos_tags=pos_tags)
+
+    def grammatical_features(self, text: str) -> tuple[Optional[str], Optional[str]]:
+        """Grammatical gender and number of an entity's head, or None each.
+
+        The head is the first noun or proper noun. Its own features come
+        first, because a leading article can disagree with them ("el agua"
+        is feminine). The article fills in only what the head does not mark,
+        which is how common-gender nouns ("la estudiante") and homonyms
+        ("la capital") carry their gender. A value is None when nothing in
+        the text marks it, as for most proper names, and always for English,
+        which has no grammatical gender for this to read.
+        """
+        if self.language == "en":
+            return None, None
+        doc = _get_nlp(self.language)(text)
+        article = doc[0] if len(doc) and doc[0].pos_ == "DET" else None
+        head = next((t for t in doc if t.pos_ in ("NOUN", "PROPN")), None)
+
+        def feature(name: str) -> Optional[str]:
+            for token in (head, article):
+                values = token.morph.get(name) if token is not None else []
+                if values:
+                    return values[0]
+            return None
+
+        return feature("Gender"), feature("Number")
 
     # --- Private helpers ---
 

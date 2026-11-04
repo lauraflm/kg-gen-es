@@ -38,6 +38,12 @@ def _representative_sort_key(text: str) -> tuple:
     return (0 if mixed_case else 1, -diacritics, len(text), text)
 
 
+def _agree(features: tuple, other: tuple) -> bool:
+    """Whether two (gender, number) pairs can name the same referent: every
+    feature both of them mark has the same value."""
+    return all(a is None or b is None or a == b for a, b in zip(features, other))
+
+
 class DeduplicateList:
     normalizer: TextNormalizer
     original_map: dict[str, str]
@@ -57,11 +63,19 @@ class DeduplicateList:
         language: str = "en",
         semhash_model=None,
         item_type: str = "entity",
+        linguistic_profile: Optional[str] = None,
     ):
         self.threshold = threshold
         self.normalizer = TextNormalizer(language=language)
         self.semhash_model = semhash_model
         self.item_type = item_type
+        # The es-v2 rules (prompts/reglas_es_v2_*.txt) say that grammatical
+        # gender and number tell entities apart, and that a predicate's
+        # agreement with its subject does not tell relations apart. Dedup
+        # follows them under that profile; None keeps v1.1's dedup.
+        es_v2 = linguistic_profile == "es-v2"
+        self.keep_gender_and_number = es_v2 and item_type == "entity"
+        self.lemmatize_agreement = es_v2 and item_type == "edge"
         self.original_map = {}
         self.items_map = {}
         self.duplicates = {}
@@ -81,7 +95,9 @@ class DeduplicateList:
         Kept as `singularize` for interface compatibility.
         """
         if self.item_type == "edge":
-            return self.normalizer.lemmatize_predicate(text)
+            return self.normalizer.lemmatize_predicate(
+                text, adjectives=self.lemmatize_agreement
+            )
         return self.normalizer.lemmatize_nouns(text)
 
     def deduplicate(self, items: list[str]) -> list[str]:
@@ -135,6 +151,12 @@ class DeduplicateList:
 
         fold_to_singular = {k: _representative(v) for k, v in fold_candidates.items()}
 
+        if self.keep_gender_and_number:
+            self._deduplicate_keeping_gender_and_number(
+                items, singular_by_item, fold_to_singular
+            )
+            return
+
         originals_by_form: dict[str, set[str]] = {}
         normalized_items = set()
         for item in items:
@@ -147,26 +169,11 @@ class DeduplicateList:
             self.items_map[singular] = _representative(originals)
 
         # Deduplicate the normalized strings
-        # Pass custom model if provided (e.g. multilingual potion)
         # `sorted`, not `list`: given two near-duplicates SemHash keeps the one
         # it saw first, so input order decides which survives. With a `set`
         # that order depends on PYTHONHASHSEED and changes between processes.
-        semhash_kwargs = {"records": sorted(normalized_items)}
-        if self.semhash_model is not None:
-            semhash_kwargs["model"] = self.semhash_model
-
-        semhash = SemHash.from_records(**semhash_kwargs, ann_backend="basic")
-        deduplication_result = semhash.self_deduplicate(threshold=self.threshold)
-
-        self.deduplicated_items = len(deduplication_result.selected)
-        # Count what actually merged, not just what SemHash discarded: the
-        # case-variant collapsing happens BEFORE SemHash is called, so those
-        # items never show up in `filtered`. Using len(filtered) reported 0
-        # duplicates in cases where a merge had in fact happened.
-        self.duplicate_items = self.total_items - self.deduplicated_items
-        self.reduction = (
-            (self.duplicate_items / self.total_items) * 100 if self.total_items else 0.0
-        )
+        deduplication_result = self._self_deduplicate(sorted(normalized_items))
+        self._record_counts(len(deduplication_result.selected))
 
         # Map back to original strings
         for duplicate in deduplication_result.filtered:
@@ -179,6 +186,116 @@ class DeduplicateList:
                     self.duplicates[original] = duplicate_value
 
         self.deduplicated = deduplication_result.selected
+
+    def _self_deduplicate(self, records: list[str]):
+        # Pass custom model if provided (e.g. multilingual potion)
+        semhash_kwargs = {"records": records}
+        if self.semhash_model is not None:
+            semhash_kwargs["model"] = self.semhash_model
+
+        semhash = SemHash.from_records(**semhash_kwargs, ann_backend="basic")
+        return semhash.self_deduplicate(threshold=self.threshold)
+
+    def _record_counts(self, deduplicated_items: int) -> None:
+        self.deduplicated_items = deduplicated_items
+        # Count what actually merged, not just what SemHash discarded: the
+        # case-variant collapsing happens BEFORE SemHash is called, so those
+        # items never show up in `filtered`. Using len(filtered) reported 0
+        # duplicates in cases where a merge had in fact happened.
+        self.duplicate_items = self.total_items - self.deduplicated_items
+        self.reduction = (
+            (self.duplicate_items / self.total_items) * 100 if self.total_items else 0.0
+        )
+
+    def _deduplicate_keeping_gender_and_number(
+        self,
+        items: list[str],
+        singular_by_item: dict[str, str],
+        fold_to_singular: dict[str, str],
+    ) -> None:
+        """es-v2 entities: v1.1's keys and SemHash records, but no node ever
+        joins two forms whose grammatical gender or number differ.
+
+        v1.1 merges every original that shares a key before SemHash, and the
+        key drops number ("los investigadores" -> "investigador") and the
+        article that alone marks gender ("la estudiante" -> "estudiante",
+        "la capital" -> "capital"). Here an original's node is its key plus
+        the (gender, number) that `grammatical_features` reads, so those stay
+        apart. A form that leaves a feature unmarked (a bare "estudiante",
+        most proper names) joins the only fully marked node of its key that
+        it agrees with, and stays on its own when it could be more than one.
+
+        SemHash then runs over exactly v1.1's records, so similarity is judged
+        on the same strings. A merge it proposes is applied node by node: a
+        node joins the only node of the surviving record it agrees with, and
+        survives on its own otherwise.
+
+        Nodes are named by their display form, which is unique, since every
+        original belongs to exactly one node.
+        """
+        groups: dict[tuple[str, tuple], set[str]] = {}
+        for item in items:
+            record = fold_to_singular[self.normalizer.fold(singular_by_item[item])]
+            features = self.normalizer.grammatical_features(self.normalize(item))
+            groups.setdefault((record, features), set()).add(item)
+
+        features_by_record: dict[str, list[tuple]] = {}
+        for record, features in groups:
+            features_by_record.setdefault(record, []).append(features)
+
+        # Targets are chosen before any group moves, so the result does not
+        # depend on the order the groups are visited in.
+        targets = {}
+        for record, features in groups:
+            if None not in features:
+                continue
+            marked = [
+                other
+                for other in features_by_record[record]
+                if None not in other and _agree(features, other)
+            ]
+            if len(marked) == 1:
+                targets[(record, features)] = (record, marked[0])
+        for group, target in targets.items():
+            groups[target] |= groups.pop(group)
+
+        nodes_by_record: dict[str, list[tuple[tuple, str]]] = {}
+        for (record, features), originals in groups.items():
+            display = min(originals, key=_representative_sort_key)
+            for item in originals:
+                self.original_map[item] = display
+            self.items_map[display] = display
+            nodes_by_record.setdefault(record, []).append((features, display))
+
+        # `sorted`, as in `deduplicate`: the input order decides which of two
+        # near-duplicates SemHash keeps.
+        deduplication_result = self._self_deduplicate(sorted(nodes_by_record))
+
+        surviving = {
+            display
+            for record in deduplication_result.selected
+            for _, display in nodes_by_record[record]
+        }
+        for duplicate in deduplication_result.filtered:
+            kept = (
+                nodes_by_record[duplicate.duplicates[0][0]]
+                if duplicate.duplicates
+                else []
+            )
+            for features, display in sorted(nodes_by_record[duplicate.record]):
+                matches = [
+                    other
+                    for other_features, other in kept
+                    if _agree(features, other_features)
+                ]
+                if len(matches) == 1:
+                    self.items_map[display] = matches[0]
+                    self.duplicates[display] = matches[0]
+                else:
+                    surviving.add(display)
+
+        self.deduplicated = sorted(surviving)
+        self._record_counts(len(self.deduplicated))
 
     def stats(self) -> str:
         return f"Total items: {self.total_items}; Deduplicated items: {self.deduplicated_items}; Duplicate items: {self.duplicate_items}; Reduction: {self.reduction:.1f}"
@@ -219,6 +336,7 @@ def run_semhash_deduplication(
     similarity_threshold: float = 0.95,
     language: str = "en",
     semhash_model_name: Optional[str] = None,
+    linguistic_profile: Optional[str] = None,
 ) -> Graph:
     """
     Deduplicate the graph.
@@ -230,6 +348,9 @@ def run_semhash_deduplication(
         semhash_model_name: HuggingFace model name for SemHash encoder.
             If None, uses SemHash's default (potion-base-8M), loaded once.
             For multilingual: "minishlab/potion-multilingual-128M".
+        linguistic_profile: "es-v2" keeps entities that differ in
+            grammatical gender or number apart, and gives predicates that
+            differ only in agreement one key. None is v1.1's dedup.
     """
     semhash_model = _load_semhash_model(semhash_model_name)
 
@@ -239,6 +360,7 @@ def run_semhash_deduplication(
         language=language,
         semhash_model=semhash_model,
         item_type="entity",
+        linguistic_profile=linguistic_profile,
     )
     entities_dedup.deduplicate(graph.entities)
     edges_dedup = DeduplicateList(
@@ -246,6 +368,7 @@ def run_semhash_deduplication(
         language=language,
         semhash_model=semhash_model,
         item_type="edge",
+        linguistic_profile=linguistic_profile,
     )
     edges_dedup.deduplicate(graph.edges)
 

@@ -1,0 +1,4 @@
+Reglas para el español:
+1. Género y número. El género y el número gramaticales distinguen referentes, y esta regla prevalece sobre la variación de número de las instrucciones anteriores. No son duplicados entre sí el investigador, la investigadora y los investigadores; tampoco el estudiante y la estudiante, donde solo cambia el artículo, ni homónimos como el capital y la capital.
+2. Artículos. Sí son duplicados las formas que solo difieren en un artículo que no cambia el género ni el número: la ciudad y ciudad, el agua y agua.
+3. El alias conserva el género y el número de los duplicados.

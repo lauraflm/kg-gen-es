@@ -24,6 +24,7 @@ def run_deduplication(
     semhash_similarity_threshold: float = 0.95,
     language: str = "en",
     semhash_model_name: Optional[str] = None,
+    linguistic_profile: Optional[str] = None,
 ) -> Graph:
     # Fail on the public boundary: an unknown value used to fall through the
     # branches below and end in an UnboundLocalError, or be masked by the
@@ -45,9 +46,16 @@ def run_deduplication(
             semhash_similarity_threshold,
             language=language,
             semhash_model_name=semhash_model_name,
+            linguistic_profile=linguistic_profile,
         )
     elif method == DeduplicateMethod.LM_BASED:
-        llm_deduplicate = LLMDeduplicate(retrieval_model, lm, graph, language=language)
+        llm_deduplicate = LLMDeduplicate(
+            retrieval_model,
+            lm,
+            graph,
+            language=language,
+            linguistic_profile=linguistic_profile,
+        )
         llm_deduplicate.cluster()
         deduplicated_graph = llm_deduplicate.deduplicate()
     elif method == DeduplicateMethod.FULL:
@@ -56,9 +64,14 @@ def run_deduplication(
             semhash_similarity_threshold,
             language=language,
             semhash_model_name=semhash_model_name,
+            linguistic_profile=linguistic_profile,
         )
         llm_deduplicate = LLMDeduplicate(
-            retrieval_model, lm, deduplicated_graph, language=language
+            retrieval_model,
+            lm,
+            deduplicated_graph,
+            language=language,
+            linguistic_profile=linguistic_profile,
         )
         llm_deduplicate.cluster()
         deduplicated_graph = llm_deduplicate.deduplicate()

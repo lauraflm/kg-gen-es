@@ -351,10 +351,12 @@ changes every Spanish graph since `v1-piloto`, so it is not done in v1.1;
 
 #### Optional linguistic profile: `es-v2`
 `linguistic_profile="es-v2"`, with `language="es"`, appends a block of Spanish
-extraction rules to the entity and relation prompts. It is off by default, and
-off means the prompts are exactly v1.1's: `tests/test_linguistic_profile.py`
+extraction rules to the entity and relation prompts, and makes deduplication
+follow its rules on gender and number. It is off by default, and off means
+prompts and dedup are exactly v1.1's: `tests/test_linguistic_profile.py`
 compares every prompt the extraction steps send against a snapshot rendered
-from the `v1.1` tag.
+from the `v1.1` tag, and `tests/test_linguistic_profile_dedup.py` states the
+default dedup result next to es-v2's.
 
 ```python
 kg = KGGen(model="openai/gpt-4o", language="es", linguistic_profile="es-v2")
@@ -405,9 +407,38 @@ de`. On the `no_dspy=True` path they are appended to
 [`entidades_es_v2.txt`](src/kg_gen/prompts/entidades_es_v2.txt) and
 [`relaciones_es_v2.txt`](src/kg_gen/prompts/relaciones_es_v2.txt): the Spanish
 files with the examples that contradicted the rules rewritten (`U.S. →
-Estados Unidos`, `fundado_por`, `inventó`). No dedup step changes. An unknown
-profile, or one whose language is not the call's, raises `ValueError` before
-any LLM call.
+Estados Unidos`, `fundado_por`, `inventó`). An unknown profile, or one whose
+language is not the call's, raises `ValueError` before any LLM call.
+
+In deduplication, at init or per call in `deduplicate()`, es-v2 follows the
+rules on grammatical gender and number that v1.1's SemHash keys drop:
+
+- **Entities.** The key is v1.1's, but two forms whose head differs in gender
+  or number never end up in one node, before SemHash or after it: `el
+  investigador` / `los investigadores`, `el estudiante` / `la estudiante`
+  (only the article marks the gender) and the homonyms `el capital` / `la
+  capital` stay apart. The features are spaCy's, read from the head noun,
+  with a leading article filling in only what the head leaves unmarked, so
+  `el agua` stays feminine. A form that marks less, such as a bare
+  `estudiante`, joins the only form it agrees with, and stays apart when it
+  could be either. Forms that agree merge as before (`la ciudad` / `ciudad`),
+  and SemHash compares exactly v1.1's strings.
+- **Predicates.** Adjectives are lemmatized too, so agreement with the
+  subject no longer splits a relation: `estar casado con`, `estar casada con`
+  and `estar casados con` share a key, as the participles of a passive with
+  *ser* already did. A noun with its own gender still tells relations apart
+  (`ser hermano de` / `ser hermana de`).
+- **LLM dedup.** Its instructions get the same rules,
+  [`reglas_es_v2_fusion_entidades.txt`](src/kg_gen/prompts/reglas_es_v2_fusion_entidades.txt)
+  for entities and
+  [`reglas_es_v2_fusion_aristas.txt`](src/kg_gen/prompts/reglas_es_v2_fusion_aristas.txt)
+  for edges. For entities they override the default's "plural form" as a
+  kind of duplicate.
+
+Keeping number apart has a cost: generic plurals such as `dinosaurio` /
+`dinosaurios` no longer merge under es-v2, so its graphs can have more nodes
+than the default's for the same text. Tense, polarity and voice are handled
+as in the default.
 
 #### Requirements and fallback behavior
 Non-English `language` values require a spaCy model for lemmatization (Spanish uses `es_core_news_md`). Install it separately, since spaCy models aren't installed as regular pip dependencies:
