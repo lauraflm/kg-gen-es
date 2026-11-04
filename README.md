@@ -326,6 +326,29 @@ language and so belongs to an experimental branch:
 - `context` is accepted by `generate()` but never forwarded to the extractors.
 - Chunking, JSON parsing leniency and retry classification are unchanged.
 
+Also kept as is, although it loses meaning in Spanish predicates. Fixing it
+changes every Spanish graph since `v1-piloto`, so it is not done in v1.1;
+`tests/test_known_limitations.py` pins the current behavior:
+
+- **Tense and mood are not in the Spanish dedup key.** The SemHash step
+  lemmatizes predicate verbs, so `fundó`, `fundará` and `fundaría` share the
+  key `fundar` and merge whatever the encoder or threshold. The merged edge
+  is labeled `fundó`, so a plan or a possibility reads as a fact. English
+  keys come from `inflect`, which leaves verbs alone, so this collapse
+  happens only in Spanish.
+- **Negation keeps its key, but SemHash merges it.** `no fundó` gets its own
+  key, `no fundar`, but at the default threshold of 0.95 SemHash merges most
+  predicates with their negation, with either encoder (`nacer en` / `no
+  nacer en`, `causar` / `no causar`; `fundar` / `no fundar` only with
+  `potion-multilingual-128M`). The pair becomes one edge labeled with the
+  form that sorts first: usually the affirmative one, so a denied relation
+  reads as asserted, and the negated one when the verb sorts after `no`
+  (`ser parte de`).
+- **With `potion-multilingual-128M`, voice too.** SemHash also merges
+  agentive passives with their active verb (`fundar` / `ser fundado por`).
+  Relations keep their endpoints, so `(Instituto Sur, ser fundado por, Ana
+  Ríos)` becomes `(Instituto Sur, fundar, Ana Ríos)`.
+
 #### Optional linguistic profile: `es-v2`
 `linguistic_profile="es-v2"`, with `language="es"`, appends a block of Spanish
 extraction rules to the entity and relation prompts. It is off by default, and
@@ -347,7 +370,14 @@ default can be attributed to the Spanish adaptation:
   requires (*fundar*, *depender de*, *dedicarse a*), with spaces, keeping
   negation, future or conditional forms and modal verbs (*poder afectar*), so
   that a possibility does not turn into a fact. Dedup keys already lemmatize
-  predicates this way; the rule makes the visible labels match them.
+  predicates to the infinitive, so the rule makes the visible labels match
+  them, except where the keys drop meaning (see
+  [Frozen at v1.1](#frozen-at-v11-robustness-fixes-and-what-is-left-as-upstream)).
+  `fundará` and `fundaría` still merge with `fundar`, and here the merged
+  edge is labeled `fundará`: `_representative_sort_key` prefers the form with
+  more accents, and of the three only the infinitive has none. So under
+  es-v2 a fact reads as a plan, the opposite of what the default prompts'
+  conjugated labels produce.
 - The personal *a* that marks the person or group receiving the action is
   left out of the predicate (*afectar*, not *afectar a*), while a preposition
   the verb requires stays (*llegar a*). Otherwise one verb ends up as two
