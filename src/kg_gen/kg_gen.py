@@ -42,6 +42,7 @@ class KGGen:
         language: str = "en",
         semhash_model_name: Optional[str] = None,
         linguistic_profile: Optional[str] = None,
+        keep_negation_apart: bool = True,
     ):
         """Initialize KGGen with optional model configuration
 
@@ -59,6 +60,9 @@ class KGGen:
                 entity, relation and LLM dedup prompts, and makes SemHash
                 dedup keep grammatical gender and number apart. If None,
                 prompts and dedup are exactly the language's defaults.
+            keep_negation_apart: SemHash dedup never merges a predicate with
+                its negation ("nacer en" / "no nacer en"), in any language.
+                False lets SemHash merge them, as upstream kg-gen does.
         """
         self.model = model
         self.reasoning_effort = reasoning_effort
@@ -74,6 +78,7 @@ class KGGen:
         self.linguistic_profile = validate_linguistic_profile(
             linguistic_profile, self.language
         )
+        self.keep_negation_apart = keep_negation_apart
 
         self.init_model(
             model=model,
@@ -213,6 +218,7 @@ class KGGen:
         semhash_model_name: Optional[str] = None,
         stats: Optional[ExtractionStats] = None,
         linguistic_profile: Optional[str] = None,
+        keep_negation_apart: Optional[bool] = None,
     ) -> Graph:
         """Generate a knowledge graph from input text or messages.
 
@@ -232,6 +238,8 @@ class KGGen:
             linguistic_profile: Override instance linguistic profile for
                 this call, extraction and deduplication alike; it must apply
                 to the call's language
+            keep_negation_apart: Override the instance value for this call's
+                deduplication
 
         Returns:
             Graph: Generated knowledge graph
@@ -364,6 +372,7 @@ class KGGen:
                 language=_language,
                 semhash_model_name=_semhash_model_name,
                 linguistic_profile=_linguistic_profile,
+                keep_negation_apart=keep_negation_apart,
             )
 
         if output_folder:
@@ -392,6 +401,7 @@ class KGGen:
         language: Optional[str] = None,
         semhash_model_name: Optional[str] = None,
         linguistic_profile: Optional[str] = None,
+        keep_negation_apart: Optional[bool] = None,
     ) -> Graph:
         # Resolve multilingual params
         _language = self._resolve_language(language)
@@ -420,6 +430,9 @@ class KGGen:
             language=_language,
             semhash_model_name=_semhash_model_name,
             linguistic_profile=_linguistic_profile,
+            keep_negation_apart=self.keep_negation_apart
+            if keep_negation_apart is None
+            else keep_negation_apart,
         )
 
     def aggregate(self, graphs: list[Graph]) -> Graph:

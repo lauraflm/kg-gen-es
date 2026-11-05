@@ -64,6 +64,7 @@ class DeduplicateList:
         semhash_model=None,
         item_type: str = "entity",
         linguistic_profile: Optional[str] = None,
+        keep_negation_apart: bool = True,
     ):
         self.threshold = threshold
         self.normalizer = TextNormalizer(language=language)
@@ -72,10 +73,16 @@ class DeduplicateList:
         # The es-v2 rules (prompts/reglas_es_v2_*.txt) say that grammatical
         # gender and number tell entities apart, and that a predicate's
         # agreement with its subject does not tell relations apart. Dedup
-        # follows them under that profile; None keeps v1.1's dedup.
+        # follows them under that profile; None keeps the default dedup.
         es_v2 = linguistic_profile == "es-v2"
         self.keep_gender_and_number = es_v2 and item_type == "entity"
         self.lemmatize_agreement = es_v2 and item_type == "edge"
+        # Predicates never merge across factuality (a fact with a plan or a
+        # possibility; read only where the key lemmatizes verbs, i.e. not in
+        # English) or, unless turned off, across polarity (a fact with its
+        # negation). See `_deduplicate_by_node`.
+        self.keep_negation_apart = keep_negation_apart and item_type == "edge"
+        self.keep_factuality_apart = item_type == "edge" and language != "en"
         self.original_map = {}
         self.items_map = {}
         self.duplicates = {}
@@ -151,9 +158,10 @@ class DeduplicateList:
 
         fold_to_singular = {k: _representative(v) for k, v in fold_candidates.items()}
 
-        if self.keep_gender_and_number:
-            self._deduplicate_keeping_gender_and_number(
-                items, singular_by_item, fold_to_singular
+        features_of = self._node_features()
+        if features_of is not None:
+            self._deduplicate_by_node(
+                items, singular_by_item, fold_to_singular, features_of
             )
             return
 
@@ -207,28 +215,62 @@ class DeduplicateList:
             (self.duplicate_items / self.total_items) * 100 if self.total_items else 0.0
         )
 
-    def _deduplicate_keeping_gender_and_number(
+    def _node_features(self):
+        """The features that keep items apart, as a function of one original,
+        or None when nothing does and the plain key-and-SemHash dedup runs."""
+        if self.keep_gender_and_number:
+            return lambda item: self.normalizer.grammatical_features(
+                self.normalize(item)
+            )
+        if self.keep_factuality_apart or self.keep_negation_apart:
+
+            def factuality_and_polarity(item: str) -> tuple:
+                text = self.normalize(item)
+                return (
+                    self.normalizer.factuality(text)
+                    if self.keep_factuality_apart
+                    else None,
+                    self.normalizer.polarity(text)
+                    if self.keep_negation_apart
+                    else None,
+                )
+
+            return factuality_and_polarity
+        return None
+
+    def _deduplicate_by_node(
         self,
         items: list[str],
         singular_by_item: dict[str, str],
         fold_to_singular: dict[str, str],
+        features_of,
     ) -> None:
-        """es-v2 entities: v1.1's keys and SemHash records, but no node ever
-        joins two forms whose grammatical gender or number differ.
+        """The default keys and SemHash records, but no node ever joins two
+        forms whose features differ.
 
-        v1.1 merges every original that shares a key before SemHash, and the
-        key drops number ("los investigadores" -> "investigador") and the
-        article that alone marks gender ("la estudiante" -> "estudiante",
-        "la capital" -> "capital"). Here an original's node is its key plus
-        the (gender, number) that `grammatical_features` reads, so those stay
-        apart. A form that leaves a feature unmarked (a bare "estudiante",
-        most proper names) joins the only fully marked node of its key that
-        it agrees with, and stays on its own when it could be more than one.
+        The features are a tuple whose values are None where the text does
+        not mark them:
 
-        SemHash then runs over exactly v1.1's records, so similarity is judged
-        on the same strings. A merge it proposes is applied node by node: a
-        node joins the only node of the surviving record it agrees with, and
-        survives on its own otherwise.
+        - es-v2 entities: (gender, number) of the head, from
+          `grammatical_features`. The key drops number ("los investigadores"
+          -> "investigador") and the article that alone marks gender ("la
+          estudiante" -> "estudiante", "la capital" -> "capital").
+        - Predicates: (factuality, polarity). The Spanish key lemmatizes
+          verbs, so "fundó" and "fundará" share "fundar", and SemHash merges
+          most predicates with their negation ("nacer en" / "no nacer en").
+
+        The plain dedup merges every original that shares a key before
+        SemHash. Here an original's node is its key plus its features, so
+        those stay apart. A form that leaves a feature unmarked (a bare
+        "estudiante", most proper names) joins the only fully marked node of
+        its key that it agrees with, and stays on its own when it could be
+        more than one.
+
+        SemHash then runs over exactly the plain dedup's records, so
+        similarity is judged on the same strings. A merge it proposes is
+        applied node by node: a node joins the only node of the surviving
+        record it agrees with, and survives on its own otherwise. When every
+        node agrees, the result is the plain dedup's.
 
         Nodes are named by their display form, which is unique, since every
         original belongs to exactly one node.
@@ -236,8 +278,7 @@ class DeduplicateList:
         groups: dict[tuple[str, tuple], set[str]] = {}
         for item in items:
             record = fold_to_singular[self.normalizer.fold(singular_by_item[item])]
-            features = self.normalizer.grammatical_features(self.normalize(item))
-            groups.setdefault((record, features), set()).add(item)
+            groups.setdefault((record, features_of(item)), set()).add(item)
 
         features_by_record: dict[str, list[tuple]] = {}
         for record, features in groups:
@@ -337,6 +378,7 @@ def run_semhash_deduplication(
     language: str = "en",
     semhash_model_name: Optional[str] = None,
     linguistic_profile: Optional[str] = None,
+    keep_negation_apart: bool = True,
 ) -> Graph:
     """
     Deduplicate the graph.
@@ -350,7 +392,13 @@ def run_semhash_deduplication(
             For multilingual: "minishlab/potion-multilingual-128M".
         linguistic_profile: "es-v2" keeps entities that differ in
             grammatical gender or number apart, and gives predicates that
-            differ only in agreement one key. None is v1.1's dedup.
+            differ only in agreement one key. None is the default dedup.
+        keep_negation_apart: never merge a predicate with its negation
+            ("nacer en" / "no nacer en"), in any language. False lets SemHash
+            merge them, as upstream kg-gen does.
+
+    Predicates in a language whose key lemmatizes verbs (all but English)
+    never merge across factuality either: "fundó" and "fundará" stay apart.
     """
     semhash_model = _load_semhash_model(semhash_model_name)
 
@@ -369,6 +417,7 @@ def run_semhash_deduplication(
         semhash_model=semhash_model,
         item_type="edge",
         linguistic_profile=linguistic_profile,
+        keep_negation_apart=keep_negation_apart,
     )
     edges_dedup.deduplicate(graph.edges)
 

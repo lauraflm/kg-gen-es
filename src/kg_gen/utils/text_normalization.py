@@ -21,6 +21,7 @@ same treatment, but it means the output is not well-formed Spanish and
 should not be shown to users.
 """
 
+import re
 import threading
 import unicodedata
 from pathlib import Path
@@ -41,6 +42,13 @@ _SPACY_MODELS: dict[str, str] = {
     # "pt": "pt_core_news_sm",
     # "it": "it_core_news_sm",      
 
+}
+
+# Words that negate a predicate, for `TextNormalizer.polarity`. English also
+# counts any token ending in "n't" ("didn't", "isn't").
+_NEGATION_WORDS: dict[str, frozenset[str]] = {
+    "es": frozenset({"no", "nunca", "jamás", "tampoco"}),
+    "en": frozenset({"not", "never", "no", "cannot", "nor"}),
 }
 
 
@@ -234,6 +242,51 @@ class TextNormalizer:
             return None
 
         return feature("Gender"), feature("Number")
+
+    def factuality(self, text: str) -> Optional[str]:
+        """Whether a predicate states a fact: "realis", "irrealis" or None.
+
+        Spanish predicate keys lemmatize verbs, so "fundó", "fundará" and
+        "fundaría" all become "fundar" and a plan or a possibility would merge
+        with a fact. This reads what the key drops: a verb or auxiliary in the
+        future, the conditional or the subjunctive makes the predicate
+        irrealis ("será fundado por", "podría afectar", "hubiera fundado").
+        Past and present stay realis together ("fundó", "fundaba", "ha
+        fundado", "funda"), since they all assert something that happened.
+
+        spaCy tags the -ra imperfect subjunctive ("fundara") as an indicative
+        past, so that form reads as realis.
+
+        None for English, whose keys come from inflect and keep the verb as
+        written, so "founded" and "will found" already differ.
+        """
+        if self.language == "en":
+            return None
+        doc = _get_nlp(self.language)(text.lower())
+        for token in doc:
+            if token.pos_ not in ("VERB", "AUX"):
+                continue
+            if "Fut" in token.morph.get("Tense") or set(
+                token.morph.get("Mood")
+            ) & {"Cnd", "Sub"}:
+                return "irrealis"
+        return "realis"
+
+    def polarity(self, text: str) -> Optional[str]:
+        """Whether a predicate is negated: "negative", "positive" or None.
+
+        Keys keep the negation ("no fundó" -> "no fundar"), but SemHash merges
+        most predicates with their negation at the default threshold, in
+        Spanish and in English. None for a language with no negation words
+        listed in `_NEGATION_WORDS`.
+        """
+        words = _NEGATION_WORDS.get(self.language)
+        if words is None:
+            return None
+        for token in re.findall(r"[\w'’]+", text.lower()):
+            if token in words or token.endswith(("n't", "n’t")):
+                return "negative"
+        return "positive"
 
     # --- Private helpers ---
 

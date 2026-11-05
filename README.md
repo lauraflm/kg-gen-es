@@ -210,7 +210,7 @@ clustered_graph = kg.cluster(
 - `language`: language code (e.g. `"es"`). Selects the language of every prompt sent to the LLM, plus the sentence splitter and lemmatization rules. Defaults to `"en"`.
 - `semhash_model_name`: HuggingFace [Model2Vec](https://github.com/MinishLab/model2vec) encoder used by SemHash. For multilingual/Spanish text, use `"minishlab/potion-multilingual-128M"` instead of the English-only SemHash default.
 
-A third one, `linguistic_profile`, adds optional language-specific extraction rules (init time or per call in `generate()`); see [the `es-v2` profile](#optional-linguistic-profile-es-v2).
+A third one, `linguistic_profile`, adds optional language-specific extraction rules (init time or per call in `generate()`); see [the `es-v2` profile](#optional-linguistic-profile-es-v2). A fourth, `keep_negation_apart` (default `True`, init time or per call), keeps SemHash from merging a predicate with its negation; see [predicate factuality and polarity](#after-v11-predicate-factuality-and-polarity).
 
 ```python
 kg = KGGen(
@@ -231,7 +231,7 @@ Currently supported: `"en"` and `"es"`.
 | Entity extraction | Instructions and field descriptions of the extraction signature |
 | Relation extraction | Instructions, field descriptions, and the few-shot `subject`/`predicate`/`object` examples — these examples are what steer the language the model emits predicates in |
 | Chunking | Picks the matching NLTK punkt sentence tokenizer |
-| Dedup normalization | spaCy lemmatization: nouns for entities, nouns and verbs for predicates, so conjugation and number variants collapse before matching |
+| Dedup normalization | spaCy lemmatization: nouns for entities, nouns and verbs for predicates, so conjugation and number variants collapse before matching. Predicate factuality is read beside the key, so a fact never merges with a plan or a possibility |
 | LLM-based dedup | Instructions of the signature that picks each cluster's alias — i.e. the entity's final name in the graph |
 
 `language` does **not** choose the embedding models. `semhash_model_name` and `retrieval_model` are set separately; leaving them at their English-only defaults while setting `language="es"` will hurt dedup quality.
@@ -326,24 +326,52 @@ language and so belongs to an experimental branch:
 - `context` is accepted by `generate()` but never forwarded to the extractors.
 - Chunking, JSON parsing leniency and retry classification are unchanged.
 
-Also kept as is, although it loses meaning in Spanish predicates. Fixing it
-changes every Spanish graph since `v1-piloto`, so it is not done in v1.1;
+#### After v1.1: predicate factuality and polarity
+Two merges made predicate dedup state the opposite of the text. Both are fixed
+after v1.1, so `language="es"` no longer reproduces v1.1's dedup, and graphs
+deduplicated before have to be deduplicated again (extraction is unchanged):
+
+- **Factuality, in every language whose key lemmatizes verbs (all but
+  English).** The Spanish key lemmatizes predicate verbs, so `fundó`,
+  `fundará` and `fundaría` share `fundar`, and they used to merge whatever the
+  encoder or threshold: labeled `fundó` with the default prompts, so a plan
+  read as a fact, and `fundará` under es-v2, so a fact read as a plan. The key
+  is unchanged, but `TextNormalizer.factuality` reads what it drops: a verb or
+  auxiliary in the future, the conditional or the subjunctive makes the
+  predicate irrealis, and a realis form never joins an irrealis one, before
+  SemHash or after it. Past and present stay together (`fundó`, `fundaba`,
+  `ha fundado`, `funda`): all of them assert something that happened, and
+  when it held is left to the dates in the graph. Futures and conditionals
+  merge with each other (`fundará` / `fundaría`, labeled `fundará`). spaCy
+  reads the -ra imperfect subjunctive (`fundara`) as an indicative past, so it
+  counts as a fact. Modal verbs and periphrases need nothing: `poder afectar`
+  and `ir a fundar` already have keys of their own. English keys come from
+  `inflect`, which leaves verbs as written, so `founded` and `will found`
+  already differ.
+- **Polarity, in every language, behind `keep_negation_apart` (default
+  `True`).** The key keeps the negation (`no fundó` -> `no fundar`), but at the
+  default threshold of 0.95 SemHash merged most predicates with their
+  negation, in Spanish more often than in English: the cosine between the two
+  forms is 0.976 / 0.992 for `nacer en` / `no nacer en` (`potion-base-8M` /
+  `potion-multilingual-128M`) and 0.946 / 0.959 for `born in` / `not born in`.
+  The merged edge was labeled with the form that sorts first, so a denied
+  relation usually read as asserted. Now a predicate never joins one of the
+  other polarity. Polarity comes from a word list per language (`no`,
+  `nunca`, `jamás`, `tampoco`; `not`, `never`, `no`, `cannot`, `nor` and any
+  `n't`). Since the guard applies to English too, `language="en"` merges less
+  than upstream kg-gen; `keep_negation_apart=False` restores upstream's
+  SemHash merges, to measure what the guard contributes on its own.
+
+Both work the way es-v2 keeps gender and number apart: SemHash compares the
+same records as before, and a merge it proposes is applied only between nodes
+that agree, so when nothing is irrealis or negated the result is exactly the
+plain dedup's (`tests/test_dedup_factuality.py`). The LLM dedup stage
+(`DeduplicateMethod.LM_BASED` and `FULL`) has no such guard: its clusters can
+still hold both forms, and whether they merge is up to the LLM.
+
+Still kept as is, although it loses meaning in Spanish predicates;
 `tests/test_known_limitations.py` pins the current behavior:
 
-- **Tense and mood are not in the Spanish dedup key.** The SemHash step
-  lemmatizes predicate verbs, so `fundó`, `fundará` and `fundaría` share the
-  key `fundar` and merge whatever the encoder or threshold. The merged edge
-  is labeled `fundó`, so a plan or a possibility reads as a fact. English
-  keys come from `inflect`, which leaves verbs alone, so this collapse
-  happens only in Spanish.
-- **Negation keeps its key, but SemHash merges it.** `no fundó` gets its own
-  key, `no fundar`, but at the default threshold of 0.95 SemHash merges most
-  predicates with their negation, with either encoder (`nacer en` / `no
-  nacer en`, `causar` / `no causar`; `fundar` / `no fundar` only with
-  `potion-multilingual-128M`). The pair becomes one edge labeled with the
-  form that sorts first: usually the affirmative one, so a denied relation
-  reads as asserted, and the negated one when the verb sorts after `no`
-  (`ser parte de`).
 - **With `potion-multilingual-128M`, voice too.** SemHash also merges
   agentive passives with their active verb (`fundar` / `ser fundado por`).
   Relations keep their endpoints, so `(Instituto Sur, ser fundado por, Ana
@@ -353,10 +381,11 @@ changes every Spanish graph since `v1-piloto`, so it is not done in v1.1;
 `linguistic_profile="es-v2"`, with `language="es"`, appends a block of Spanish
 extraction rules to the entity and relation prompts, and makes deduplication
 follow its rules on gender and number. It is off by default, and off means
-prompts and dedup are exactly v1.1's: `tests/test_linguistic_profile.py`
-compares every prompt the extraction steps send against a snapshot rendered
-from the `v1.1` tag, and `tests/test_linguistic_profile_dedup.py` states the
-default dedup result next to es-v2's.
+prompts are exactly v1.1's and dedup is the default's:
+`tests/test_linguistic_profile.py` compares every prompt the extraction steps
+send against a snapshot rendered from the `v1.1` tag, and
+`tests/test_linguistic_profile_dedup.py` states the default dedup result next
+to es-v2's.
 
 ```python
 kg = KGGen(model="openai/gpt-4o", language="es", linguistic_profile="es-v2")
@@ -373,13 +402,9 @@ default can be attributed to the Spanish adaptation:
   negation, future or conditional forms and modal verbs (*poder afectar*), so
   that a possibility does not turn into a fact. Dedup keys already lemmatize
   predicates to the infinitive, so the rule makes the visible labels match
-  them, except where the keys drop meaning (see
-  [Frozen at v1.1](#frozen-at-v11-robustness-fixes-and-what-is-left-as-upstream)).
-  `fundará` and `fundaría` still merge with `fundar`, and here the merged
-  edge is labeled `fundará`: `_representative_sort_key` prefers the form with
-  more accents, and of the three only the infinitive has none. So under
-  es-v2 a fact reads as a plan, the opposite of what the default prompts'
-  conjugated labels produce.
+  them, and the factuality read beside the key keeps `fundar` and `fundará`
+  on separate edges (see
+  [predicate factuality and polarity](#after-v11-predicate-factuality-and-polarity)).
 - The personal *a* that marks the person or group receiving the action is
   left out of the predicate (*afectar*, not *afectar a*), while a preposition
   the verb requires stays (*llegar a*). Otherwise one verb ends up as two
@@ -411,9 +436,9 @@ Estados Unidos`, `fundado_por`, `inventó`). An unknown profile, or one whose
 language is not the call's, raises `ValueError` before any LLM call.
 
 In deduplication, at init or per call in `deduplicate()`, es-v2 follows the
-rules on grammatical gender and number that v1.1's SemHash keys drop:
+rules on grammatical gender and number that the default SemHash keys drop:
 
-- **Entities.** The key is v1.1's, but two forms whose head differs in gender
+- **Entities.** The key is the default's, but two forms whose head differs in gender
   or number never end up in one node, before SemHash or after it: `el
   investigador` / `los investigadores`, `el estudiante` / `la estudiante`
   (only the article marks the gender) and the homonyms `el capital` / `la
@@ -422,7 +447,7 @@ rules on grammatical gender and number that v1.1's SemHash keys drop:
   `el agua` stays feminine. A form that marks less, such as a bare
   `estudiante`, joins the only form it agrees with, and stays apart when it
   could be either. Forms that agree merge as before (`la ciudad` / `ciudad`),
-  and SemHash compares exactly v1.1's strings.
+  and SemHash compares exactly the default's strings.
 - **Predicates.** Adjectives are lemmatized too, so agreement with the
   subject no longer splits a relation: `estar casado con`, `estar casada con`
   and `estar casados con` share a key, as the participles of a passive with

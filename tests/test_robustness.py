@@ -299,7 +299,7 @@ def test_unknown_dedup_method_is_rejected_up_front():
 def test_dedup_method_accepts_its_string_value(monkeypatch):
     seen = {}
 
-    def fake_semhash(graph, threshold, language, semhash_model_name, linguistic_profile):
+    def fake_semhash(graph, threshold, **_):
         seen["called"] = True
         return graph
 

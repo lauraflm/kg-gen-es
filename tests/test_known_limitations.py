@@ -1,9 +1,9 @@
-"""Pins Spanish predicate dedup behavior that loses meaning and is kept in v1.1.
+"""Pins Spanish predicate dedup behavior that still loses meaning.
 
-Every test here asserts the current behavior on purpose, wrong as it is. The
-fix changes every Spanish graph since `v1-piloto`, so it is left out of v1.1
-(README, "Frozen at v1.1"). A failure means that behavior changed: update the
-README along with the test.
+Every test here asserts the current behavior on purpose, wrong as it is. A
+failure means that behavior changed: update the README ("Known limitations of
+predicate dedup") along with the test. What is fixed, factuality and
+polarity, is tested in tests/test_dedup_factuality.py.
 
 No LLM and no network. The prefusion tests replace SemHash with the stub from
 tests/test_deduplicate.py, so any merge they see was made by the dedup key.
@@ -13,11 +13,8 @@ when a model is not already in the Hugging Face cache.
 
 import pytest
 
-from src.kg_gen.utils import deduplicate as dedup_module
 from src.kg_gen.utils.deduplicate import DeduplicateList
 from src.kg_gen.utils.text_normalization import TextNormalizer
-
-from test_deduplicate import KeepAllSemHash
 
 BASE_ENCODER = "minishlab/potion-base-8M"
 MULTILINGUAL_ENCODER = "minishlab/potion-multilingual-128M"
@@ -28,15 +25,10 @@ def _displays(dedup, items):
     return {item: dedup.items_map[dedup.original_map[item]] for item in items}
 
 
-def _prefuse(items, monkeypatch):
-    monkeypatch.setattr(dedup_module, "SemHash", KeepAllSemHash)
-    dedup = DeduplicateList(language="es", item_type="edge")
-    dedup.deduplicate(items)
-    return dedup
-
-
-def _semhash(items, encoder):
-    dedup = DeduplicateList(language="es", semhash_model=encoder, item_type="edge")
+def _semhash(items, encoder, **kwargs):
+    dedup = DeduplicateList(
+        language="es", semhash_model=encoder, item_type="edge", **kwargs
+    )
     dedup.deduplicate(items)
     return dedup
 
@@ -47,55 +39,35 @@ def normalizer_es():
 
 
 # --------------------------------------------------------------------------
-# Tense and mood: dropped by the dedup key
+# Voice: kept by the key, merged by SemHash
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "predicate", ["fundó", "fundaron", "funda", "fundará", "fundaría", "fundar"]
-)
-def test_key_drops_tense_and_mood(normalizer_es, predicate):
-    assert normalizer_es.lemmatize_predicate(predicate) == "fundar"
+def test_key_keeps_voice(normalizer_es):
+    """The key loses it: when these merge, SemHash merged them."""
+    assert normalizer_es.lemmatize_predicate("fue fundado por") == "ser fundar por"
 
 
 @pytest.mark.parametrize(
-    "predicate, key",
-    [("no fundó", "no fundar"), ("fue fundado por", "ser fundar por")],
-)
-def test_key_keeps_negation_and_voice(normalizer_es, predicate, key):
-    """The key loses neither: when these merge, SemHash merged them."""
-    assert normalizer_es.lemmatize_predicate(predicate) == key
-
-
-def test_default_labels_turn_plans_into_facts(monkeypatch):
-    """The default prompts conjugate, and the past tense wins the label."""
-    items = ["fundó", "fundará", "fundaría"]
-    dedup = _prefuse(items, monkeypatch)
-
-    assert len(dedup.deduplicated) == 1
-    assert set(_displays(dedup, items).values()) == {"fundó"}
-
-
-@pytest.mark.parametrize(
-    "items, label",
+    "encoder_name, labels",
     [
-        (["fundar", "fundará"], "fundará"),
-        (["fundar", "fundaría"], "fundaría"),
-        (["fundar", "fundará", "fundaría"], "fundará"),
+        (BASE_ENCODER, {"fundar", "ser fundado por"}),
+        # Relations keep their endpoints, so a passive triple merged into the
+        # active verb states the opposite direction.
+        (MULTILINGUAL_ENCODER, {"fundar"}),
     ],
 )
-def test_es_v2_labels_turn_facts_into_plans(monkeypatch, items, label):
-    """es-v2 asks for infinitives but keeps futures and conditionals. Those
-    still share the infinitive's key, and the label goes to the form with
-    more accents, which the infinitive never is."""
-    dedup = _prefuse(items, monkeypatch)
+def test_semhash_merges_voice_with_the_multilingual_encoder(
+    semhash_encoders, encoder_name, labels
+):
+    items = ["fundar", "ser fundado por"]
+    dedup = _semhash(items, semhash_encoders(encoder_name))
 
-    assert len(dedup.deduplicated) == 1
-    assert set(_displays(dedup, items).values()) == {label}
+    assert set(_displays(dedup, items).values()) == labels
 
 
 # --------------------------------------------------------------------------
-# Negation and voice: kept by the key, merged by SemHash
+# Negation, when keep_negation_apart=False: upstream's SemHash merges
 # --------------------------------------------------------------------------
 
 
@@ -103,10 +75,14 @@ def test_es_v2_labels_turn_facts_into_plans(monkeypatch, items, label):
 @pytest.mark.parametrize(
     "affirmative, negated", [("nacer en", "no nacer en"), ("causar", "no causar")]
 )
-def test_semhash_merges_negation_into_the_affirmative(
+def test_without_the_guard_semhash_merges_negation_into_the_affirmative(
     semhash_encoders, encoder_name, affirmative, negated
 ):
-    dedup = _semhash([affirmative, negated], semhash_encoders(encoder_name))
+    dedup = _semhash(
+        [affirmative, negated],
+        semhash_encoders(encoder_name),
+        keep_negation_apart=False,
+    )
 
     assert _displays(dedup, [affirmative, negated]) == {
         affirmative: affirmative,
@@ -127,15 +103,11 @@ def test_semhash_merges_negation_into_the_affirmative(
         # Close to the threshold: cosine 0.948 base, 0.990 multilingual.
         (["fundar", "no fundar"], BASE_ENCODER, {"fundar", "no fundar"}),
         (["fundar", "no fundar"], MULTILINGUAL_ENCODER, {"fundar"}),
-        # Voice. Relations keep their endpoints, so a passive triple merged
-        # into the active verb states the opposite direction.
-        (["fundar", "ser fundado por"], BASE_ENCODER, {"fundar", "ser fundado por"}),
-        (["fundar", "ser fundado por"], MULTILINGUAL_ENCODER, {"fundar"}),
     ],
 )
-def test_semhash_merge_depends_on_the_encoder(
+def test_without_the_guard_negation_merge_depends_on_the_encoder(
     semhash_encoders, items, encoder_name, labels
 ):
-    dedup = _semhash(items, semhash_encoders(encoder_name))
+    dedup = _semhash(items, semhash_encoders(encoder_name), keep_negation_apart=False)
 
     assert set(_displays(dedup, items).values()) == labels
