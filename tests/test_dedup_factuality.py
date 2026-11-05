@@ -1,11 +1,13 @@
-"""Predicate dedup keeps facts apart from plans and possibilities, and
-affirmations apart from their negation.
+"""Predicate dedup keeps facts apart from plans and possibilities, and,
+when asked, affirmations apart from their negation.
 
-Factuality applies where the key lemmatizes verbs (every language but
-English), so "fundó" and "fundará" no longer share one edge. Polarity applies
-in every language, and `keep_negation_apart=False` turns it off; with it off,
-tests/test_known_limitations.py pins what upstream's SemHash does. When
-nothing is irrealis or negated, the result is the plain dedup's.
+Factuality applies by default where the key lemmatizes verbs (every language
+but English), so "fundó" and "fundará" no longer share one edge;
+`keep_factuality_apart=False` reproduces v1.1. Polarity applies in every
+language, but only with `keep_negation_apart=True`: by default SemHash merges
+a predicate with its negation as upstream does, which
+tests/test_known_limitations.py pins. When nothing is irrealis or negated,
+the result is the plain dedup's.
 
 No LLM and no network. SemHash is replaced by stubs, or loaded from the local
 Hugging Face cache and skipped when a model is not there.
@@ -202,6 +204,36 @@ def test_factuality_is_kept_even_without_the_negation_guard(monkeypatch):
     assert labels == {"fundó": "fundó", "fundará": "fundará"}
 
 
+def test_factuality_off_merges_plans_with_facts_as_v1_1(monkeypatch):
+    monkeypatch.setattr(dedup_module, "SemHash", KeepAllSemHash)
+    items = ["fundó", "fundaron", "fundará", "fundaría"]
+
+    labels = _labels(_dedup(items, keep_factuality_apart=False), items)
+
+    assert len(set(labels.values())) == 1
+
+
+@pytest.mark.parametrize("language", ["es", "en"])
+def test_both_guards_off_is_the_plain_dedup(language):
+    """Nothing reads features, so v1.1's key-and-SemHash path runs."""
+    dedup = DeduplicateList(
+        language=language,
+        item_type="edge",
+        keep_negation_apart=False,
+        keep_factuality_apart=False,
+    )
+
+    assert dedup._node_features() is None
+
+
+def test_english_dedup_is_the_plain_one_by_default():
+    """English keys do not lemmatize verbs and the negation guard is off, so
+    by default English predicates dedup exactly as upstream's."""
+    dedup = DeduplicateList(language="en", item_type="edge")
+
+    assert dedup._node_features() is None
+
+
 # --------------------------------------------------------------------------
 # The guard after SemHash
 # --------------------------------------------------------------------------
@@ -217,7 +249,9 @@ def test_factuality_is_kept_even_without_the_negation_guard(monkeypatch):
 def test_a_semhash_merge_never_joins_different_features(monkeypatch, language, items):
     monkeypatch.setattr(dedup_module, "SemHash", MergeAllSemHash)
 
-    labels = _labels(_dedup(items, language=language), items)
+    labels = _labels(
+        _dedup(items, language=language, keep_negation_apart=True), items
+    )
 
     assert labels == {item: item for item in items}
 
@@ -226,7 +260,7 @@ def test_a_semhash_merge_still_joins_what_agrees(monkeypatch):
     monkeypatch.setattr(dedup_module, "SemHash", MergeAllSemHash)
     items = ["nacer en", "nació en", "llegar a", "no nacer en", "no llegar a"]
 
-    labels = _labels(_dedup(items), items)
+    labels = _labels(_dedup(items, keep_negation_apart=True), items)
 
     assert labels == {
         "nacer en": "llegar a",
@@ -253,7 +287,12 @@ def test_a_semhash_merge_still_joins_what_agrees(monkeypatch):
 )
 def test_real_semhash_keeps_negation_apart(semhash_encoders, encoder_name, items):
     language = "en" if items[0] in ("born in", "cause") else "es"
-    dedup = _dedup(items, language=language, semhash_model=semhash_encoders(encoder_name))
+    dedup = _dedup(
+        items,
+        language=language,
+        semhash_model=semhash_encoders(encoder_name),
+        keep_negation_apart=True,
+    )
 
     assert _labels(dedup, items) == {item: item for item in items}
 
@@ -286,7 +325,9 @@ def test_without_irrealis_or_negation_the_result_is_the_plain_dedup(
     semhash_encoders, monkeypatch, encoder_name, language, items
 ):
     encoder = semhash_encoders(encoder_name)
-    guarded = _dedup(items, language=language, semhash_model=encoder)
+    guarded = _dedup(
+        items, language=language, semhash_model=encoder, keep_negation_apart=True
+    )
 
     plain = DeduplicateList(
         language=language, semhash_model=encoder, item_type="edge"
@@ -315,13 +356,15 @@ def test_graph_keeps_a_plan_and_a_denial_on_their_own_edges(monkeypatch):
         },
     )
 
-    out = dedup_module.run_semhash_deduplication(graph, language="es")
+    out = dedup_module.run_semhash_deduplication(
+        graph, language="es", keep_negation_apart=True
+    )
 
     assert out.edges == {"fundó", "fundará", "no fundó"}
     assert {r[1] for r in out.relations} == {"fundó", "fundará", "no fundó"}
 
 
-def test_graph_merges_negation_when_the_guard_is_off(monkeypatch):
+def test_graph_merges_negation_by_default(monkeypatch):
     monkeypatch.setattr(dedup_module, "SemHash", MergeAllSemHash)
     graph = Graph(
         entities={"Ana", "Lima"},
@@ -329,15 +372,13 @@ def test_graph_merges_negation_when_the_guard_is_off(monkeypatch):
         relations={("Ana", "nació en", "Lima"), ("Ana", "no nació en", "Lima")},
     )
 
-    out = dedup_module.run_semhash_deduplication(
-        graph, language="es", keep_negation_apart=False
-    )
+    out = dedup_module.run_semhash_deduplication(graph, language="es")
 
     assert len(out.edges) == 1
 
 
 # --------------------------------------------------------------------------
-# The flag reaches deduplication
+# The flags reach deduplication
 # --------------------------------------------------------------------------
 
 
@@ -346,19 +387,20 @@ def recorded_flags(monkeypatch):
     seen = []
 
     def fake_semhash(graph, threshold, **kwargs):
-        seen.append(kwargs["keep_negation_apart"])
+        seen.append((kwargs["keep_negation_apart"], kwargs["keep_factuality_apart"]))
         return graph
 
     monkeypatch.setattr(dedup_step, "run_semhash_deduplication", fake_semhash)
     return seen
 
 
-def test_run_deduplication_guards_negation_by_default(recorded_flags):
+def test_run_deduplication_defaults(recorded_flags):
+    """Negation merges as upstream; factuality is kept apart."""
     graph = Graph(entities={"Ana"}, edges=set(), relations=set())
 
     run_deduplication(None, graph, method=DeduplicateMethod.SEMHASH, language="es")
 
-    assert recorded_flags == [True]
+    assert recorded_flags == [(False, True)]
 
 
 @pytest.fixture
@@ -368,7 +410,7 @@ def recorded_kggen_flags(monkeypatch):
     seen = []
 
     def fake_run_deduplication(**kwargs):
-        seen.append(kwargs["keep_negation_apart"])
+        seen.append((kwargs["keep_negation_apart"], kwargs["keep_factuality_apart"]))
         return kwargs["graph"]
 
     monkeypatch.setattr(kg_gen_module, "run_deduplication", fake_run_deduplication)
@@ -384,25 +426,45 @@ def _graph():
     return Graph(entities={"Ana"}, edges=set(), relations=set())
 
 
-@pytest.mark.parametrize(
-    "instance, call, expected",
-    [(True, None, True), (False, None, False), (True, False, False), (False, True, True)],
-)
+def test_kggen_defaults(recorded_kggen_flags):
+    kg = _offline_kggen(language="es")
+
+    kg.deduplicate(_graph(), method="semhash")
+
+    assert recorded_kggen_flags == [(False, True)]
+
+
+_RESOLUTION = [
+    (True, None, True),
+    (False, None, False),
+    (True, False, False),
+    (False, True, True),
+]
+
+
+@pytest.mark.parametrize("flag", ["keep_negation_apart", "keep_factuality_apart"])
+@pytest.mark.parametrize("instance, call, expected", _RESOLUTION)
 def test_kggen_deduplicate_resolves_the_flag(
-    recorded_kggen_flags, instance, call, expected
+    recorded_kggen_flags, flag, instance, call, expected
 ):
-    kg = _offline_kggen(language="es", keep_negation_apart=instance)
+    kg = _offline_kggen(language="es", **{flag: instance})
 
-    kg.deduplicate(_graph(), method="semhash", keep_negation_apart=call)
+    kg.deduplicate(_graph(), method="semhash", **{flag: call})
 
-    assert recorded_kggen_flags == [expected]
+    index = 0 if flag == "keep_negation_apart" else 1
+    assert recorded_kggen_flags[0][index] == expected
 
 
-def test_kggen_generate_passes_its_flag(monkeypatch, recorded_kggen_flags):
+def test_kggen_generate_passes_its_flags(monkeypatch, recorded_kggen_flags):
     monkeypatch.setattr(kg_gen_module, "get_entities", lambda *a, **k: ["Ana"])
     monkeypatch.setattr(kg_gen_module, "get_relations", lambda *a, **k: [])
     kg = _offline_kggen(language="es")
 
-    kg.generate("Ana.", deduplication_method="semhash", keep_negation_apart=False)
+    kg.generate(
+        "Ana.",
+        deduplication_method="semhash",
+        keep_negation_apart=True,
+        keep_factuality_apart=False,
+    )
 
-    assert recorded_kggen_flags == [False]
+    assert recorded_kggen_flags == [(True, False)]

@@ -25,7 +25,8 @@ def run_deduplication(
     language: str = "en",
     semhash_model_name: Optional[str] = None,
     linguistic_profile: Optional[str] = None,
-    keep_negation_apart: bool = True,
+    keep_negation_apart: bool = False,
+    keep_factuality_apart: bool = True,
 ) -> Graph:
     # Fail on the public boundary: an unknown value used to fall through the
     # branches below and end in an UnboundLocalError, or be masked by the
@@ -49,6 +50,7 @@ def run_deduplication(
             semhash_model_name=semhash_model_name,
             linguistic_profile=linguistic_profile,
             keep_negation_apart=keep_negation_apart,
+            keep_factuality_apart=keep_factuality_apart,
         )
     elif method == DeduplicateMethod.LM_BASED:
         llm_deduplicate = LLMDeduplicate(
@@ -68,6 +70,7 @@ def run_deduplication(
             semhash_model_name=semhash_model_name,
             linguistic_profile=linguistic_profile,
             keep_negation_apart=keep_negation_apart,
+            keep_factuality_apart=keep_factuality_apart,
         )
         llm_deduplicate = LLMDeduplicate(
             retrieval_model,

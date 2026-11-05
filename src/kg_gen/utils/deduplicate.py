@@ -64,7 +64,8 @@ class DeduplicateList:
         semhash_model=None,
         item_type: str = "entity",
         linguistic_profile: Optional[str] = None,
-        keep_negation_apart: bool = True,
+        keep_negation_apart: bool = False,
+        keep_factuality_apart: bool = True,
     ):
         self.threshold = threshold
         self.normalizer = TextNormalizer(language=language)
@@ -79,10 +80,13 @@ class DeduplicateList:
         self.lemmatize_agreement = es_v2 and item_type == "edge"
         # Predicates never merge across factuality (a fact with a plan or a
         # possibility; read only where the key lemmatizes verbs, i.e. not in
-        # English) or, unless turned off, across polarity (a fact with its
-        # negation). See `_deduplicate_by_node`.
+        # English) unless that is turned off, nor, when it is turned on,
+        # across polarity (a fact with its negation). See
+        # `_deduplicate_by_node`.
         self.keep_negation_apart = keep_negation_apart and item_type == "edge"
-        self.keep_factuality_apart = item_type == "edge" and language != "en"
+        self.keep_factuality_apart = (
+            keep_factuality_apart and item_type == "edge" and language != "en"
+        )
         self.original_map = {}
         self.items_map = {}
         self.duplicates = {}
@@ -378,7 +382,8 @@ def run_semhash_deduplication(
     language: str = "en",
     semhash_model_name: Optional[str] = None,
     linguistic_profile: Optional[str] = None,
-    keep_negation_apart: bool = True,
+    keep_negation_apart: bool = False,
+    keep_factuality_apart: bool = True,
 ) -> Graph:
     """
     Deduplicate the graph.
@@ -393,12 +398,13 @@ def run_semhash_deduplication(
         linguistic_profile: "es-v2" keeps entities that differ in
             grammatical gender or number apart, and gives predicates that
             differ only in agreement one key. None is the default dedup.
-        keep_negation_apart: never merge a predicate with its negation
-            ("nacer en" / "no nacer en"), in any language. False lets SemHash
-            merge them, as upstream kg-gen does.
-
-    Predicates in a language whose key lemmatizes verbs (all but English)
-    never merge across factuality either: "fundó" and "fundará" stay apart.
+        keep_negation_apart: if True, never merge a predicate with its
+            negation ("nacer en" / "no nacer en"), in any language. Off by
+            default: SemHash merges them, as upstream kg-gen does.
+        keep_factuality_apart: in a language whose predicate keys lemmatize
+            verbs (all but English), never merge a fact with a plan or a
+            possibility: "fundó" and "fundará" stay apart. False reproduces
+            v1.1's dedup.
     """
     semhash_model = _load_semhash_model(semhash_model_name)
 
@@ -418,6 +424,7 @@ def run_semhash_deduplication(
         item_type="edge",
         linguistic_profile=linguistic_profile,
         keep_negation_apart=keep_negation_apart,
+        keep_factuality_apart=keep_factuality_apart,
     )
     edges_dedup.deduplicate(graph.edges)
 

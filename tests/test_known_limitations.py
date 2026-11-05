@@ -2,8 +2,9 @@
 
 Every test here asserts the current behavior on purpose, wrong as it is. A
 failure means that behavior changed: update the README ("Known limitations of
-predicate dedup") along with the test. What is fixed, factuality and
-polarity, is tested in tests/test_dedup_factuality.py.
+predicate dedup") along with the test. What is fixed, factuality, and
+what can be turned on, polarity, are tested in
+tests/test_dedup_factuality.py.
 
 No LLM and no network. The prefusion tests replace SemHash with the stub from
 tests/test_deduplicate.py, so any merge they see was made by the dedup key.
@@ -67,7 +68,7 @@ def test_semhash_merges_voice_with_the_multilingual_encoder(
 
 
 # --------------------------------------------------------------------------
-# Negation, when keep_negation_apart=False: upstream's SemHash merges
+# Negation, by default (keep_negation_apart=False): upstream's SemHash merges
 # --------------------------------------------------------------------------
 
 
