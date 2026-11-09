@@ -44,6 +44,24 @@ def _agree(features: tuple, other: tuple) -> bool:
     return all(a is None or b is None or a == b for a, b in zip(features, other))
 
 
+def _chain_end(start: str, links: dict, ends: set):
+    """Follow `links` from `start` to the first member of `ends`, or None
+    when the chain reaches none: a link to nothing (None, or a name with no
+    link of its own) or a loop.
+
+    SemHash names as a discarded record's duplicate the first neighbour in
+    index order, and that neighbour may be a record it discards too, so a
+    merge can take more than one step to reach a record that survives.
+    """
+    seen = set()
+    while start not in ends:
+        if start in seen or links.get(start) is None:
+            return None
+        seen.add(start)
+        start = links[start]
+    return start
+
+
 class DeduplicateList:
     normalizer: TextNormalizer
     original_map: dict[str, str]
@@ -185,19 +203,39 @@ class DeduplicateList:
         # it saw first, so input order decides which survives. With a `set`
         # that order depends on PYTHONHASHSEED and changes between processes.
         deduplication_result = self._self_deduplicate(sorted(normalized_items))
-        self._record_counts(len(deduplication_result.selected))
 
-        # Map back to original strings
-        for duplicate in deduplication_result.filtered:
-            original = duplicate.record
-            # duplicate.duplicates is a list of (record, score) tuples
-            if duplicate.duplicates:
-                duplicate_value = duplicate.duplicates[0][0]
-                self.items_map[original] = self.items_map[duplicate_value]
-                if original not in self.duplicates:
-                    self.duplicates[original] = duplicate_value
+        # Map back to original strings.
+        #
+        # A discarded record's listed duplicate may be discarded too ("ancient
+        # Egyptian" -> "ancient Egyptian hieroglyph" -> "Egyptian
+        # hieroglyph"). Copying the duplicate's label one step at a time, in
+        # the order SemHash lists the records, left the first one on the
+        # middle label whenever it came first; that label is no longer an
+        # item, so its relations pointed outside the graph. Each record now
+        # takes the label of the record SemHash kept at the end of its chain,
+        # whatever the order. A record whose chain reaches no kept record (one
+        # discarded with no duplicate listed, or a loop) stays on its own
+        # rather than leaving the graph.
+        # duplicate.duplicates is a list of (record, score) tuples
+        targets = {
+            duplicate.record: (
+                duplicate.duplicates[0][0] if duplicate.duplicates else None
+            )
+            for duplicate in deduplication_result.filtered
+        }
+        kept = set(deduplication_result.selected)
+        surviving = list(deduplication_result.selected)
+        for original, duplicate_value in targets.items():
+            end = _chain_end(original, targets, kept)
+            if end is None:
+                surviving.append(original)
+                continue
+            self.items_map[original] = self.items_map[end]
+            if original not in self.duplicates:
+                self.duplicates[original] = duplicate_value
 
-        self.deduplicated = deduplication_result.selected
+        self.deduplicated = surviving
+        self._record_counts(len(surviving))
 
     def _self_deduplicate(self, records: list[str]):
         # Pass custom model if provided (e.g. multilingual potion)
@@ -338,6 +376,37 @@ class DeduplicateList:
                     self.duplicates[display] = matches[0]
                 else:
                     surviving.add(display)
+
+        # The record SemHash listed may be one it discarded too, so the node
+        # joined above may have joined another node in turn, or not survived
+        # at all, leaving this one on a label the graph no longer has. Follow
+        # each join to a surviving node. Agreement lets an unmarked feature
+        # match anything, so it does not carry along the chain ("la
+        # profesora" -> "colega" -> "el doctor"): a node that does not agree
+        # with the end of its chain, or whose chain reaches no surviving node,
+        # stays on its own, as when it matches no node. Decided on the joins
+        # made above, before any changes, so the visiting order does not
+        # matter.
+        features_of_display = {
+            display: features
+            for nodes in nodes_by_record.values()
+            for features, display in nodes
+        }
+        joins = dict(self.duplicates)
+        stays = set()
+        for display in joins:
+            end = _chain_end(display, joins, surviving)
+            if end is not None and _agree(
+                features_of_display[display], features_of_display[end]
+            ):
+                self.items_map[display] = end
+                self.duplicates[display] = end
+            else:
+                stays.add(display)
+        for display in stays:
+            self.items_map[display] = display
+            del self.duplicates[display]
+        surviving |= stays
 
         self.deduplicated = sorted(surviving)
         self._record_counts(len(self.deduplicated))

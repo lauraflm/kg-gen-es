@@ -386,6 +386,27 @@ Still kept as is, although it loses meaning in Spanish predicates;
   Relations keep their endpoints, so `(Instituto Sur, ser fundado por, Ana
   Ríos)` becomes `(Instituto Sur, fundar, Ana Ríos)`.
 
+#### After v1.2: SemHash merges that chain
+SemHash (0.3.2) discards a record when any of its neighbours was already seen
+next to a kept record, and lists as its duplicate the first neighbour in index
+order, which can be a record it discards too. The map back to the original
+names resolved one step at a time, in the order SemHash lists the records, so
+with `A -> B -> C` (`C` kept) and `A` listed first, A's relations stayed on
+B's label, which is no longer an entity or an edge. The LLM stage of `FULL`
+deduplicates entities and edges only, so it passed those relations through.
+The code is upstream's, so it happened in every language: the full MINE run
+of 7 Nov 2026 found one entity (en: `ancient Egyptians` -> `ancient Egyptian
+hieroglyphs` -> `Egyptian hieroglyphs`) and one predicate (es: `fue utilizada
+por` -> `es utilizado en` -> `se utilizaban en`) in 210 graphs.
+
+A merge now follows its chain to the record SemHash kept, whatever the order,
+both in the plain dedup and under the agreement guards, where a node joins the
+end of its chain only if it agrees with it. A record whose chain reaches no
+kept record stays on its own. Which entities and edges survive is unchanged;
+only the relations of a broken chain move (`tests/test_semhash_chains.py`). On
+the 210 raw graphs of that run, the SemHash output is identical to v1.2's
+except for those two relations.
+
 #### Optional linguistic profile: `es-v2`
 `linguistic_profile="es-v2"`, with `language="es"`, appends a block of Spanish
 extraction rules to the entity and relation prompts, and makes deduplication
